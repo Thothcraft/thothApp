@@ -65,7 +65,9 @@ class ChatRepository {
     List<ChatTurn> history = const [],
     List<ChatAttachment> attachments = const [],
     bool includeContext = true,
-    String model = 'standard',
+    // '4'|'5'|'6' — numbered model picks (hub maps them to concrete
+    // model ids); 'standard'/'advanced' still accepted for old clients.
+    String model = '4',
   }) async {
     final res = await BrainClient.instance.postV1('/chat', body: {
       'message': message,

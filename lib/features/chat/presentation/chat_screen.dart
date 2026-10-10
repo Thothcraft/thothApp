@@ -24,11 +24,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   final List<_Msg> _msgs = [];
   final List<ChatAttachment> _pending = [];
   bool _sending = false;
-  // Answer tier slider — 0 = 'standard' (fast, gpt-4o-mini),
-  // 1 = 'advanced' (gpt-4o + a much larger context bundle).
-  double _tier = 0;
+  // Model pick sent to /v1/chat — the hub maps '4'→gpt-4o-class,
+  // '5'→gpt-5, '6'→gpt-6 (env-overridable server-side).
+  String _model = '4';
 
-  String get _modelTier => _tier >= 0.5 ? 'advanced' : 'standard';
+  static const _modelChoices = {
+    '4': '4 · gpt-4o',
+    '5': '5 · gpt-5',
+    '6': '6 · gpt-6',
+  };
 
   static const _suggestions = [
     'What can you see right now?',
@@ -67,7 +71,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               ? history.sublist(history.length - 12)
               : history,
           attachments: atts,
-          model: _modelTier,);
+          model: _model,);
       if (!mounted) return;
       setState(() {
         _msgs.removeWhere((m) => m.thinking);
@@ -207,45 +211,44 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 ],
               ),
             ),
-          _modelSlider(),
+          _modelPicker(),
           _composer(),
         ],),
       ),
     );
   }
 
-  Widget _modelSlider() {
-    final advanced = _modelTier == 'advanced';
+  Widget _modelPicker() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 2, 16, 0),
       child: Row(children: [
-        Icon(Icons.bolt,
-            size: 16,
-            color: advanced ? Colors.grey : AppColors.primaryBlue,),
-        const SizedBox(width: 4),
-        Text('Fast',
-            style: TextStyle(
-                fontSize: 11,
-                fontWeight:
-                    advanced ? FontWeight.normal : FontWeight.w600,
-                color: advanced ? Colors.grey : null,),),
+        const Icon(Icons.psychology,
+            size: 16, color: Colors.grey,),
+        const SizedBox(width: 8),
+        const Text('Model',
+            style: TextStyle(fontSize: 11, color: Colors.grey),),
+        const SizedBox(width: 8),
         Expanded(
-          child: Slider(
-            value: _tier,
-            divisions: 1,
-            onChanged: (v) => setState(() => _tier = v),
+          child: SegmentedButton<String>(
+            segments: [
+              for (final e in _modelChoices.entries)
+                ButtonSegment(
+                    value: e.key,
+                    label: Text(e.value,
+                        style: const TextStyle(fontSize: 11),),),
+            ],
+            selected: {_model},
+            showSelectedIcon: false,
+            style: SegmentedButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              selectedBackgroundColor:
+                  AppColors.primaryBlue.withValues(alpha: 0.16),
+            ),
+            onSelectionChanged: (s) =>
+                setState(() => _model = s.first),
           ),
         ),
-        Text('Advanced',
-            style: TextStyle(
-                fontSize: 11,
-                fontWeight:
-                    advanced ? FontWeight.w600 : FontWeight.normal,
-                color: advanced ? null : Colors.grey,),),
-        const SizedBox(width: 4),
-        Icon(Icons.psychology,
-            size: 16,
-            color: advanced ? AppColors.primaryBlue : Colors.grey,),
       ],),
     );
   }
