@@ -40,7 +40,16 @@ class WatchLink {
   bool _motionStale = false;
 
   Stream<WatchTelemetry> get telemetry => _telemetry.stream;
-  /// Whether the thoth-fork stamped motion char (00030003) is present —
+  /// Last connection state — replayed to every listener before live
+  /// events, so a screen opened after the link came up still resolves
+  /// (broadcast streams don't replay; without this the detail page's
+  /// `firstWhere(connected)` waits forever on an already-live link).
+  BluetoothConnectionState _lastConn = BluetoothConnectionState.disconnected;
+
+  Stream<BluetoothConnectionState> get connection async* {
+    yield _lastConn;
+    yield* _connection.stream;
+  }
   /// when false the link falls back to polling reads of the legacy char.
   bool get stampedMotion => _stampedMotion;
   /// Motion samples received since connect — diagnostics for the
@@ -70,8 +79,6 @@ class WatchLink {
       _motionStale = false;
     }
   }
-  Stream<BluetoothConnectionState> get connection => _connection.stream;
-
   String get bleId => device.remoteId.str;
 
   /// Android 12+ runtime permissions; no-op where already granted / on iOS.
@@ -116,6 +123,7 @@ class WatchLink {
   Future<void> connect() async {
     await ensurePermissions();
     _connSub = device.connectionState.listen((s) {
+      _lastConn = s;
       _connection.add(s);
       if (s == BluetoothConnectionState.disconnected && !_disposed) {
         unawaited(_connectLoop());
@@ -125,9 +133,10 @@ class WatchLink {
     // so a watch that is already linked (lingering GATT connection)
     // would otherwise leave the UI waiting for an event that fired
     // before we subscribed.
-    _connection.add(device.isConnected
+    _lastConn = device.isConnected
         ? BluetoothConnectionState.connected
-        : BluetoothConnectionState.disconnected,);
+        : BluetoothConnectionState.disconnected;
+    _connection.add(_lastConn);
     await _connectLoop();
   }
 

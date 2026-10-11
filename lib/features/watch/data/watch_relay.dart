@@ -65,8 +65,12 @@ class WatchRelay {
       'value': value,
       'estimator': 'thoth-app-watch-relay',
       if (transition != null) 'transition': transition,
-    }).then<void>((_) {}).catchError(
-        (Object e) => debugPrint('[watch-relay] state $key: $e'),),);
+    },).catchError(
+      (Object e) {
+        debugPrint('[watch-relay] state $key: $e');
+        return <String, dynamic>{};
+      },
+    ),);
   }
 
   int _seq = 0;
