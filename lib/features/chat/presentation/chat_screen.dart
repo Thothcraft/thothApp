@@ -63,7 +63,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     try {
       final history = _msgs
           .where((m) =>
-              !m.thinking && !m.isError && m.content.isNotEmpty)
+              !m.thinking && !m.isError && m.content.isNotEmpty,)
           .map((m) => ChatTurn(
               role: m.isUser ? 'user' : 'assistant', content: m.content,),)
           .toList();
@@ -593,19 +593,19 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   padding: const EdgeInsets.only(left: 16, bottom: 2),
                   child: Text(l,
                       style: const TextStyle(fontSize: 11,
-                          fontFamily: 'monospace'),),),
+                          fontFamily: 'monospace',),),),
               ),
           ],
         );
     return Column(children: [
       tile(Icons.layers_outlined, 'Bundle sections',
           sections.map((s) =>
-              '$s — ${bundle[s] is List ? (bundle[s] as List).length : bundle[s] is Map ? '1' : ''}').toList(),),
+              '$s — ${bundle[s] is List ? (bundle[s] as List).length : bundle[s] is Map ? '1' : ''}',).toList(),),
       tile(Icons.sensors, 'Descriptor feeds', descKeys),
       tile(Icons.devices, 'Owned devices (person:owner)', devices),
       tile(Icons.people_outline, 'Persons', persons),
       tile(Icons.tune, 'Model picks',
-          [for (final e in picks.entries) '${e.key} → ${e.value}']),
+          [for (final e in picks.entries) '${e.key} → ${e.value}'],),
       tile(Icons.rule,
           'Caps',
           ['history: ${prov['history']?['max_turns'] ?? '?'} turns × '

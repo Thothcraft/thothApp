@@ -378,16 +378,20 @@ class ObservationService {
     final ent = PhoneRelay.instance.deviceUuid != null
         ? 'device:${PhoneRelay.instance.deviceUuid}'
         : observerId;
-    unawaited(_repo
-        .postState(
+    unawaited(Future(() async {
+      try {
+        await _repo.postState(
           stateKey: 'app.focus.v1',
           entityId: ent,
           value: {'app': 'thothcraft', 'foreground': foreground},
           transition: foreground ? 'enter' : 'exit',
           estimator: 'mobile.lifecycle',
           confidence: 1.0,
-        )
-        .catchError((Object e) => debugPrint('[observe] focus state: $e'),),);
+        );
+      } catch (e) {
+        debugPrint('[observe] focus state: $e');
+      }
+    }),);
   }
 
   /// Flush the pending batch to ``/v1/context/evidence`` — idempotent via

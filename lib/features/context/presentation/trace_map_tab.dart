@@ -75,7 +75,7 @@ class _TraceMapTabState extends State<TraceMapTab> {
               textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.grey),
             ),
-          ]),
+          ],),
         ),
       );
     }
@@ -110,9 +110,9 @@ class _TraceMapTabState extends State<TraceMapTab> {
               point: LatLng(last.lat, last.lon),
               width: 40, height: 40,
               child: Icon(Icons.navigation,
-                  color: _rssiColor(last.rssi), size: 26),
+                  color: _rssiColor(last.rssi), size: 26,),
             ),
-          ]),
+          ],),
         ],
       ),
       Positioned(
@@ -145,10 +145,10 @@ class _TraceMapTabState extends State<TraceMapTab> {
                   _followed = false;
                 },
               ),
-            ]),
+            ],),
           ),
         ),
       ),
-    ]);
+    ],);
   }
 }

@@ -209,7 +209,9 @@ class AppScaffold extends ConsumerWidget {
     if (location.startsWith(AppRoutes.chat)) return 2;
     if (location.startsWith(AppRoutes.actions) ||
         location.startsWith(AppRoutes.actuators) ||
-        location.startsWith(AppRoutes.events)) return 3;
+        location.startsWith(AppRoutes.events)) {
+      return 3;
+    }
     if (location.startsWith(AppRoutes.devices)) return 4;
     if (location.startsWith(AppRoutes.settings)) return 5;
     return 0; // home, watch, research, actuators

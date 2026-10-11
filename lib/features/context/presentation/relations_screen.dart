@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../devices/application/devices_provider.dart';
 import '../../watch/application/watch_providers.dart';
 import '../application/context_providers.dart';
 import 'ble_map.dart';

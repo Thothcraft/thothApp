@@ -90,24 +90,24 @@ class _ActuatorsScreenState extends ConsumerState<ActuatorsScreen> {
       'title': 'Watch linked → lights red',
       'name': 'watch-linked-red',
       'when': {'key': 'watch.link.v1',
-               'contains': {'connected': true}},
+               'contains': {'connected': true},},
       'then': {'actuator_id': 'led', 'operation': 'set_color',
-               'params': {'rgb': [255, 0, 0]}},
+               'params': {'rgb': [255, 0, 0]},},
     },
     {
       'title': 'Watch <10 m → lights green',
       'name': 'watch-near-green',
       'when': {'key': 'proximity.v1',
-               'field': 'distance_m', 'max': 10},
+               'field': 'distance_m', 'max': 10,},
       'then': {'actuator_id': 'led', 'operation': 'set_color',
-               'params': {'rgb': [0, 255, 0]}},
+               'params': {'rgb': [0, 255, 0]},},
     },
     {
       'title': 'Person at laptop → lights yellow',
       'name': 'person-at-laptop-yellow',
       'when': {'key': 'prediction', 'not_equals': 'no_face'},
       'then': {'actuator_id': 'led', 'operation': 'set_color',
-               'params': {'rgb': [255, 255, 0]}},
+               'params': {'rgb': [255, 255, 0]},},
     },
     {
       'title': 'Room occupied → phone notification',
@@ -115,7 +115,7 @@ class _ActuatorsScreenState extends ConsumerState<ActuatorsScreen> {
       'when': {'key': 'occupancy.v1', 'contains': {'occupied': true}},
       'then': {'actuator_id': 'notify', 'operation': 'notify',
                'params': {'title': 'Thoth · room occupied',
-                          'body': 'Presence detected in the room'},},
+                          'body': 'Presence detected in the room',},},
     },
   ];
 
@@ -124,11 +124,11 @@ class _ActuatorsScreenState extends ConsumerState<ActuatorsScreen> {
     final whenCtl = TextEditingController(
         text: const JsonEncoder.withIndent('  ').convert(
             {'key': 'occupancy.v1',
-             'contains': {'occupied': true}}),);
+             'contains': {'occupied': true},}),);
     final thenCtl = TextEditingController(
         text: const JsonEncoder.withIndent('  ').convert(
             {'actuator_id': 'notify', 'operation': 'notify',
-             'params': {'title': 'Thoth', 'body': ''}},),);
+             'params': {'title': 'Thoth', 'body': ''},},),);
     final coolCtl = TextEditingController(text: '0');
     final saved = await showModalBottomSheet<bool>(
       context: context,
@@ -154,9 +154,9 @@ class _ActuatorsScreenState extends ConsumerState<ActuatorsScreen> {
                         onPressed: () => setS(() {
                           nameCtl.text = p['name'] as String;
                           whenCtl.text = const JsonEncoder.withIndent(
-                              '  ').convert(p['when']);
+                              '  ',).convert(p['when']);
                           thenCtl.text = const JsonEncoder.withIndent(
-                              '  ').convert(p['then']);
+                              '  ',).convert(p['then']);
                         },),
                       ),
                   ],
