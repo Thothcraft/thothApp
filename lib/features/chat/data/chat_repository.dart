@@ -84,7 +84,7 @@ class ChatRepository {
       'attachments': [for (final a in attachments) a.toJson()],
       'include_context': includeContext,
       'model': model,
-    },);
+    }, timeout: const Duration(minutes: 3),);
     return ChatAnswer.fromJson(res);
   }
 

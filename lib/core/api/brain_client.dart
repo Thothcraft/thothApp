@@ -99,11 +99,17 @@ class BrainClient {
   }
 
   /// POST a versioned v1 endpoint.
+  ///
+  /// [timeout] overrides BOTH send/receive timeouts — LLM-backed
+  /// calls (chat, transcribe) legitimately outlive the 30 s default.
   Future<Map<String, dynamic>> postV1(String path,
-      {Map<String, dynamic>? body,}) async {
+      {Map<String, dynamic>? body, Duration? timeout,}) async {
     await init();
+    final opts = timeout == null
+        ? _opts
+        : _opts.copyWith(receiveTimeout: timeout, sendTimeout: timeout);
     final res = await _dio.post(_v1(path),
-        data: body ?? {}, options: _opts,);
+        data: body ?? {}, options: opts,);
     return Map<String, dynamic>.from(res.data as Map);
   }
 
