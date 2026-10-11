@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../devices/application/devices_provider.dart';
 import '../../watch/application/watch_providers.dart';
 import '../application/context_providers.dart';
 import 'ble_map.dart';
 import 'spatial_map.dart';
+import 'trace_map_tab.dart';
 
 /// Shared radio evidence graph; unknown positions remain unlocated.
 class RelationsScreen extends ConsumerWidget {
@@ -47,10 +49,14 @@ class RelationsScreen extends ConsumerWidget {
         }
 
         return DefaultTabController(
-            length: 2,
+            length: 3,
             child: Column(children: [
               const TabBar(
-                  tabs: [Tab(text: 'House · 3D'), Tab(text: 'Radio links')],),
+                  tabs: [
+            Tab(text: 'House · 3D'),
+            Tab(text: 'Radio links'),
+            Tab(text: 'Trace'),
+          ],),
               Expanded(
                   child: TabBarView(children: [
                 SpatialMapView(
@@ -65,6 +71,7 @@ class RelationsScreen extends ConsumerWidget {
                               watchNames: watchNames,),),),
                   _DescriptorList(edges: edges, watchNames: watchNames),
                 ],),
+                const TraceMapTab(),
               ],),),
             ],),);
       },

@@ -26,6 +26,7 @@ import '../features/watch/presentation/enroll_screen.dart';
 import '../features/watch/presentation/watch_screen.dart';
 import '../features/watch/presentation/pinetime_detail_screen.dart';
 import '../features/events/presentation/events_screen.dart';
+import '../features/actions/presentation/actions_screen.dart';
 import '../features/actuators/presentation/actuators_screen.dart';
 import '../features/research/presentation/research_screen.dart';
 import '../features/contact/presentation/contact_screen.dart';
@@ -59,6 +60,7 @@ class AppRoutes {
   static const String setup = '/setup';
   static const String calibrate = '/calibrate';
   static const String chat = '/chat';
+  static const String actions = '/actions';
 }
 
 /// Router is a provider so redirects react to auth state changes.
@@ -133,6 +135,22 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               child: RelationsScreen(),
             ),
           ),
+          // Chat tab — assistant lives inside the shell so the nav bar
+          // has its own destination icon.
+          GoRoute(
+            path: AppRoutes.chat,
+            pageBuilder: (context, state) => const NoTransitionPage(
+              child: ChatScreen(),
+            ),
+          ),
+          // Actions tab — automations + actuators + context in one
+          // tabbed surface.
+          GoRoute(
+            path: AppRoutes.actions,
+            pageBuilder: (context, state) => const NoTransitionPage(
+              child: ActionsScreen(),
+            ),
+          ),
         ],
       ),
 
@@ -152,11 +170,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.calibrate,
         builder: (context, state) => const CalibrateScreen(),
-      ),
-      // Assistant — full-screen chat surface over /v1/chat.
-      GoRoute(
-        path: AppRoutes.chat,
-        builder: (context, state) => const ChatScreen(),
       ),
       GoRoute(
         path: '/watch/enroll',

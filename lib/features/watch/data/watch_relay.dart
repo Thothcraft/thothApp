@@ -40,6 +40,34 @@ class WatchRelay {
   Timer? _flushTimer;
   Timer? _heartbeatTimer;
   StreamSubscription<WatchTelemetry>? _telemetrySub;
+  StreamSubscription<BluetoothConnectionState>? _connSub;
+
+  // ── context-state producers (rules + assistant read these) ─────────
+  // watch.link.v1    {connected, rssi}        — link up/down
+  // proximity.v1     {distance_m, rssi}       — watch↔phone BLE range
+  // watch.worn.v1    {worn, acc_std, n}       — IMU-variance heuristic
+  bool? _worn;
+  double? _lastProxPushM;
+  double _lastProxPushAt = 0;
+
+  String get _watchEntity => 'device:${record.deviceUuid}';
+
+  /// Upsert one context state for this watch — user-scoped, so it
+  /// lands on the same /v1/context surface rules and the assistant
+  /// read. Fire-and-forget: offline → skip silently.
+  void _pushState(String key, Map<String, dynamic> value,
+      {String? transition,}) {
+    final client = BrainClient.instance;
+    if (!client.hasToken) return;
+    unawaited(client.postV1('/context/state', body: {
+      'key': key,
+      'entity_id': _watchEntity,
+      'value': value,
+      'estimator': 'thoth-app-watch-relay',
+      if (transition != null) 'transition': transition,
+    }).then<void>((_) {}).catchError(
+        (Object e) => debugPrint('[watch-relay] state $key: $e'),),);
+  }
 
   int _seq = 0;
   int? _battery;
@@ -117,6 +145,19 @@ class WatchRelay {
     _running = true;
     _link = link;
     _telemetrySub = link.telemetry.listen(_onTelemetry);
+    // Link state transitions drive the watch.link.v1 context state —
+    // the automation edge-trigger depends on this being pushed on BOTH
+    // edges, not just connect.
+    _connSub = link.connection.listen((s) {
+      final connected = s == BluetoothConnectionState.connected;
+      _pushState('watch.link.v1', {
+        'connected': connected,
+        if (_rssi != null) 'rssi': _rssi,
+      }, transition: connected ? 'enter' : 'exit',);
+      if (!connected) {
+        _worn = null; // link-down → unknown, not "unworn"
+      }
+    });
     // Flush every 10 s — one live-chunk post keeps streams + online fresh.
     _flushTimer = Timer.periodic(const Duration(seconds: 10), (_) => unawaited(_flush()));
     // Watch heartbeat carries pending_commands — 30 s cadence keeps the
@@ -244,6 +285,7 @@ class WatchRelay {
     if (_buffer.isEmpty || !BrainClient.instance.hasToken) return;
     final pending = List<WatchTelemetry>.from(_buffer);
     _buffer.clear();
+    _flushStates(pending);
     final now = DateTime.now().toUtc();
     try {
       await BrainClient.instance.uploadLiveChunk(record.deviceUuid, {
@@ -262,6 +304,64 @@ class WatchRelay {
       _lastError = '$e';
       _chunksFailed++;
       debugPrint('[watch-relay] chunk upload failed: $e');
+    }
+  }
+
+  /// Derive + publish context states from the flushed window —
+  /// proximity (path-loss estimate) and worn/unworn (IMU variance with
+  /// hysteresis). Cheap on the wire: proximity only moves on ≥0.5 m
+  /// drift or 60 s stale; worn only flips on classification change.
+  void _flushStates(List<WatchTelemetry> window) {
+    // proximity — free-space path-loss, same model the stream payload uses.
+    final rssi = _rssi;
+    if (rssi != null) {
+      final m = pow(10, (-59 - rssi) / 20).toDouble();
+      final nowS = DateTime.now().millisecondsSinceEpoch / 1000.0;
+      final moved = _lastProxPushM == null ||
+          (m - _lastProxPushM!).abs() >= 0.5;
+      if (moved || nowS - _lastProxPushAt >= 60) {
+        _lastProxPushM = m;
+        _lastProxPushAt = nowS;
+        _pushState('proximity.v1', {
+          'distance_m': double.parse(m.toStringAsFixed(2)),
+          'rssi': rssi,
+        });
+      }
+    }
+
+    // worn — std of accel over the window. A resting watch on a desk
+    // sits at ~zero variance; a worn wrist never does. Hysteresis
+    // keeps a wrist-held-still from flickering to "unworn".
+    final motions =
+        [for (final t in window) if (t.motion != null) t.motion!];
+    if (motions.length >= 10) {
+      double std(List<double> xs) {
+        final mean = xs.reduce((a, b) => a + b) / xs.length;
+        final v = xs.fold<double>(0, (s, x) => s + (x - mean) * (x - mean)) /
+            xs.length;
+        return v <= 0 ? 0.0 : pow(v, 0.5).toDouble();
+      }
+      final sx = std([for (final m in motions) m.x]);
+      final sy = std([for (final m in motions) m.y]);
+      final sz = std([for (final m in motions) m.z]);
+      final accStd = double.parse(
+          ((sx + sy + sz) / 3).toStringAsFixed(4),);
+      final bool worn;
+      if (accStd >= 0.02) {
+        worn = true;
+      } else if (accStd <= 0.008) {
+        worn = false;
+      } else {
+        worn = _worn ?? false;
+      }
+      if (_worn != worn) {
+        _worn = worn;
+        _pushState('watch.worn.v1', {
+          'worn': worn,
+          'acc_std': accStd,
+          'n': motions.length,
+        }, transition: worn ? 'enter' : 'exit',);
+      }
     }
   }
 
@@ -379,6 +479,7 @@ class WatchRelay {
     _running = false;
     _flushTimer?.cancel();
     _heartbeatTimer?.cancel();
+    await _connSub?.cancel();
     await _telemetrySub?.cancel();
     await _flush(); // best-effort final drain
     await _link?.dispose();

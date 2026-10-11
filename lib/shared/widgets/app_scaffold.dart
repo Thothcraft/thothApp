@@ -23,9 +23,14 @@ class AppScaffold extends ConsumerWidget {
       label: 'Map'
     ),
     (
+      icon: Icons.auto_awesome_outlined,
+      active: Icons.auto_awesome,
+      label: 'Chat'
+    ),
+    (
       icon: Icons.bolt_outlined,
       active: Icons.bolt,
-      label: 'Activity'
+      label: 'Actions'
     ),
     (
       icon: Icons.devices_outlined,
@@ -42,33 +47,41 @@ class AppScaffold extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final auth = ref.watch(authProvider);
+    final location = GoRouterState.of(context).uri.path;
+    // The chat surface carries its own app bar + composer — supplying
+    // the shell's chrome here would double the headers.
+    final isChat = location == AppRoutes.chat;
     return Scaffold(
-      appBar: AppBar(
-        title: const Row(
-          children: [
-            CellLogo(size: 30),
-            SizedBox(width: 8),
-            Text(AppConstants.appName),
-          ],
-        ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: Center(
-              child: _PlanBadge(plan: auth.plan),
+      appBar: isChat
+          ? null
+          : AppBar(
+              title: const Row(
+                children: [
+                  CellLogo(size: 30),
+                  SizedBox(width: 8),
+                  Text(AppConstants.appName),
+                ],
+              ),
+              actions: [
+                Padding(
+                  padding: const EdgeInsets.only(right: 12),
+                  child: Center(
+                    child: _PlanBadge(plan: auth.plan),
+                  ),
+                ),
+              ],
             ),
-          ),
-        ],
-      ),
-      drawer: _buildDrawer(context, ref, auth),
+      drawer: isChat ? null : _buildDrawer(context, ref, auth),
       body: child,
       bottomNavigationBar: _buildNavBar(context),
-      floatingActionButton: FloatingActionButton(
-        heroTag: 'assistant',
-        tooltip: 'Assistant',
-        onPressed: () => context.push(AppRoutes.chat),
-        child: const Icon(Icons.auto_awesome),
-      ),
+      floatingActionButton: isChat
+          ? null
+          : FloatingActionButton(
+              heroTag: 'assistant',
+              tooltip: 'Assistant',
+              onPressed: () => context.push(AppRoutes.chat),
+              child: const Icon(Icons.auto_awesome),
+            ),
     );
   }
 
@@ -126,8 +139,10 @@ class AppScaffold extends ConsumerWidget {
           const _DrawerLabel('System'),
           _item(context, Icons.watch_outlined, 'Watch (PineTime)',
               () => context.go(AppRoutes.watch),),
-          _item(context, Icons.toggle_on_outlined, 'Automation & actuators',
-              () => context.go(AppRoutes.actuators),),
+          _item(context, Icons.toggle_on_outlined, 'Actions · automation · context',
+              () => context.go(AppRoutes.actions),),
+          _item(context, Icons.bolt_outlined, 'Activity feed',
+              () => context.go(AppRoutes.events),),
           _item(context, Icons.science_outlined, 'Research & models',
               () => context.go(AppRoutes.research),),
           _item(context, Icons.insights_outlined, 'Context & entities',
@@ -191,9 +206,12 @@ class AppScaffold extends ConsumerWidget {
 
   int _getSelectedIndex(String location) {
     if (location.startsWith(AppRoutes.context)) return 1; // map
-    if (location.startsWith(AppRoutes.events)) return 2;
-    if (location.startsWith(AppRoutes.devices)) return 3;
-    if (location.startsWith(AppRoutes.settings)) return 4;
+    if (location.startsWith(AppRoutes.chat)) return 2;
+    if (location.startsWith(AppRoutes.actions) ||
+        location.startsWith(AppRoutes.actuators) ||
+        location.startsWith(AppRoutes.events)) return 3;
+    if (location.startsWith(AppRoutes.devices)) return 4;
+    if (location.startsWith(AppRoutes.settings)) return 5;
     return 0; // home, watch, research, actuators
   }
 
@@ -204,10 +222,12 @@ class AppScaffold extends ConsumerWidget {
       case 1:
         context.go(AppRoutes.context);
       case 2:
-        context.go(AppRoutes.events);
+        context.go(AppRoutes.chat);
       case 3:
-        context.go(AppRoutes.devices);
+        context.go(AppRoutes.actions);
       case 4:
+        context.go(AppRoutes.devices);
+      case 5:
         context.go(AppRoutes.settings);
     }
   }

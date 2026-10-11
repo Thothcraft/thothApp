@@ -169,6 +169,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         ],),
         actions: [
           IconButton(
+            tooltip: 'Context & settings — what feeds the model',
+            icon: const Icon(Icons.tune),
+            onPressed: _showFeedSheet,
+          ),
+          IconButton(
             tooltip: 'What the assistant sees',
             icon: const Icon(Icons.visibility_outlined),
             onPressed: _showContext,
@@ -357,6 +362,27 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         : Theme.of(context)
                             .colorScheme
                             .onSurface,),
+                if (m.assessments.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Wrap(
+                      spacing: 6, runSpacing: 4,
+                      children: [
+                        for (final a in m.assessments)
+                          Tooltip(
+                            message: '${a['basis'] ?? ''}',
+                            child: Chip(
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              label: Text(
+                                'p=${((a['probability'] as num?) ?? 0).toStringAsFixed(2)} · '
+                                '${a['claim'] ?? ''}',
+                                style: const TextStyle(fontSize: 10),),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
                 if (m.modelId != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 6),
@@ -440,6 +466,155 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     );
   }
 
+  /// The chat settings surface — shows exactly which sections,
+  /// descriptor keys, owned devices, calibration refs and caps the
+  /// model is fed right now, and edits the user's ChatConfig (window
+  /// length + section toggles) persisted on the hub.
+  Future<void> _showFeedSheet() async {
+    Map<String, dynamic> bundle;
+    try {
+      bundle = await _repo.contextBundle();
+    } catch (e) {
+      _snack('Could not fetch context: $e');
+      return;
+    }
+    if (!mounted) return;
+    final cfg = Map<String, dynamic>.from(bundle['config'] as Map? ?? {});
+    cfg['window_s'] ??= 900.0;
+    for (final k in const [
+      'include_scenes', 'include_descriptors', 'include_reference',
+      'include_builder', 'include_usage', 'include_persons_places',
+    ]) {
+      cfg[k] ??= true;
+    }
+    final prov = Map<String, dynamic>.from(
+        bundle['provenance'] as Map? ?? {},);
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.85,
+          builder: (ctx, scroll) => ListView(
+            controller: scroll,
+            padding: const EdgeInsets.all(16),
+            children: [
+              Text('What feeds the assistant',
+                  style: Theme.of(ctx).textTheme.titleMedium,),
+              const SizedBox(height: 12),
+              _feedSections(bundle, prov),
+              const Divider(height: 28),
+              Text('Your configuration',
+                  style: Theme.of(ctx).textTheme.titleSmall,),
+              const SizedBox(height: 8),
+              Row(children: [
+                const Expanded(child: Text('Evidence window')), 
+                Text('${(cfg['window_s'] as num).round() ~/ 60} min'),
+              ],),
+              Slider(
+                min: 1, max: 240, divisions: 48,
+                value: ((cfg['window_s'] as num).toDouble() / 60)
+                    .clamp(1, 240),
+                label: '${(cfg['window_s'] as num).round() ~/ 60} min',
+                onChanged: (v) =>
+                    setS(() => cfg['window_s'] = v * 60.0),
+              ),
+              for (final e in const [
+                ('include_descriptors', 'Sensor descriptors'),
+                ('include_scenes', 'Scenes'),
+                ('include_reference', 'Calibration & reference'),
+                ('include_persons_places', 'Persons & places'),
+                ('include_builder', 'Builder status'),
+                ('include_usage', 'Quota/usage'),
+              ])
+                SwitchListTile(
+                  dense: true,
+                  title: Text(e.$2, style: const TextStyle(fontSize: 13),),
+                  value: cfg[e.$1] == true,
+                  onChanged: (v) => setS(() => cfg[e.$1] = v),
+                ),
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                icon: const Icon(Icons.save),
+                label: const Text('Save configuration'),
+                onPressed: () async {
+                  try {
+                    await _repo.putConfig(cfg);
+                    if (ctx.mounted) Navigator.pop(ctx);
+                  } catch (e) {
+                    _snack('Save failed: $e');
+                  }
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Read-only half of the feed sheet — sections the model received
+  /// with counts, live descriptor keys, owned devices, persons/places
+  /// and the provenance caps.
+  Widget _feedSections(Map<String, dynamic> bundle,
+      Map<String, dynamic> prov,) {
+    final sections =
+        [for (final s in (prov['sections'] as List? ?? [])) '$s'];
+    final descKeys = [
+      for (final d in (bundle['descriptors'] as List? ?? const []))
+        if (d is Map) '${d['key']}@${d['device']}',
+    ];
+    final devices = [
+      for (final d in (bundle['devices'] as List? ?? const []))
+        if (d is Map)
+          '${d['name'] ?? d['uuid']} · ${d['type'] ?? '?'}'
+              '${d['owned'] == true ? ' · yours' : ''}',
+    ];
+    final persons = [
+      for (final p in (bundle['persons'] as List? ?? const []))
+        if (p is Map) '${p['id']}${p['name'] != null ? ' (${p['name']})' : ''}',
+    ];
+    final picks = Map<String, dynamic>.from(
+        prov['model_picks'] as Map? ?? {},);
+    Widget tile(IconData i, String title, List<String> lines) =>
+        ExpansionTile(
+          dense: true,
+          tilePadding: EdgeInsets.zero,
+          leading: Icon(i, size: 18),
+          title: Text(title, style: const TextStyle(fontSize: 13),),
+          subtitle: Text('${lines.length} item(s)',
+              style: const TextStyle(fontSize: 11, color: Colors.grey),),
+          children: [
+            for (final l in lines.take(12))
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 16, bottom: 2),
+                  child: Text(l,
+                      style: const TextStyle(fontSize: 11,
+                          fontFamily: 'monospace'),),),
+              ),
+          ],
+        );
+    return Column(children: [
+      tile(Icons.layers_outlined, 'Bundle sections',
+          sections.map((s) =>
+              '$s — ${bundle[s] is List ? (bundle[s] as List).length : bundle[s] is Map ? '1' : ''}').toList(),),
+      tile(Icons.sensors, 'Descriptor feeds', descKeys),
+      tile(Icons.devices, 'Owned devices (person:owner)', devices),
+      tile(Icons.people_outline, 'Persons', persons),
+      tile(Icons.tune, 'Model picks',
+          [for (final e in picks.entries) '${e.key} → ${e.value}']),
+      tile(Icons.rule,
+          'Caps',
+          ['history: ${prov['history']?['max_turns'] ?? '?'} turns × '
+              '${prov['history']?['max_chars_per_turn'] ?? '?'} chars',
+            'attachments: ${prov['attachments']?['max'] ?? '?'} × '
+                '${((prov['attachments']?['image_bytes'] ?? 0) as num) ~/ 1048576} MB',]),
+    ],);
+  }
+
   Future<void> _showContext() async {
     try {
       final bundle = await _repo.contextBundle();
@@ -516,6 +691,7 @@ class _Msg {
         thinking = false,
         content = text,
         attachments = atts,
+        assessments = const [],
         widgets = const [],
         contextUsed = null,
         modelId = null;
@@ -526,6 +702,7 @@ class _Msg {
         thinking = false,
         content = a.answer,
         attachments = const [],
+        assessments = a.assessments,
         widgets = a.widgets,
         contextUsed = a.contextUsed,
         modelId = a.modelId;
@@ -536,6 +713,7 @@ class _Msg {
         thinking = false,
         content = msg,
         attachments = const [],
+        assessments = const [],
         widgets = const [],
         contextUsed = null,
         modelId = null;
@@ -546,6 +724,7 @@ class _Msg {
         thinking = true,
         content = '',
         attachments = const [],
+        assessments = const [],
         widgets = const [],
         contextUsed = null,
         modelId = null;
@@ -555,6 +734,7 @@ class _Msg {
   final bool thinking;
   final String content;
   final List<ChatAttachment> attachments;
+  final List<Map<String, dynamic>> assessments;
   final List<Map<String, dynamic>> widgets;
   final Map<String, dynamic>? contextUsed;
   final String? modelId;

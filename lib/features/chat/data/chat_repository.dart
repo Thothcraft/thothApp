@@ -25,6 +25,7 @@ class ChatAttachment {
 class ChatAnswer {
   ChatAnswer({
     required this.answer,
+    this.assessments = const [],
     required this.widgets,
     required this.contextUsed,
     required this.attachments,
@@ -34,6 +35,11 @@ class ChatAnswer {
 
   factory ChatAnswer.fromJson(Map<String, dynamic> j) => ChatAnswer(
         answer: (j['answer'] ?? '') as String,
+        assessments: (j['assessments'] as List?)
+                ?.whereType<Map>()
+                .map((w) => Map<String, dynamic>.from(w))
+                .toList() ??
+            const [],
         widgets: (j['widgets'] as List?)
                 ?.whereType<Map>()
                 .map((w) => Map<String, dynamic>.from(w))
@@ -51,6 +57,9 @@ class ChatAnswer {
       );
 
   final String answer;
+  /// Claim-level probabilities the model emitted for its factual
+  /// statements — {claim, probability, basis}.
+  final List<Map<String, dynamic>> assessments;
   final List<Map<String, dynamic>> widgets;
   final Map<String, dynamic>? contextUsed;
   final List<String> attachments;
@@ -82,4 +91,15 @@ class ChatRepository {
   /// GET /v1/chat/context — the bundle the assistant sees.
   Future<Map<String, dynamic>> contextBundle() =>
       BrainClient.instance.getV1('/chat/context');
+
+  /// GET /v1/chat/config — user-context configuration (window, section
+  /// toggles, bundle cap) the settings sheet edits.
+  Future<Map<String, dynamic>> config() async {
+    final res = await BrainClient.instance.getV1('/chat/config');
+    return Map<String, dynamic>.from(res['config'] as Map? ?? {});
+  }
+
+  /// PUT /v1/chat/config — persist the user's context configuration.
+  Future<void> putConfig(Map<String, dynamic> cfg) =>
+      BrainClient.instance.putJson('/v1/chat/config', body: cfg);
 }

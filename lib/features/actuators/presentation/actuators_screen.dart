@@ -81,6 +81,158 @@ class _ActuatorsScreenState extends ConsumerState<ActuatorsScreen> {
     return const {};
   }
 
+  /// One-tap starters for the common rule shapes — every field stays
+  /// editable in the sheet, nothing is hardcoded into the rule once
+  /// saved. `actuator_id` defaults to `led`; change it to the real
+  /// actuator on the target node (or `notify` for a phone push).
+  static const _presets = <Map<String, dynamic>>[
+    {
+      'title': 'Watch linked → lights red',
+      'name': 'watch-linked-red',
+      'when': {'key': 'watch.link.v1',
+               'contains': {'connected': true}},
+      'then': {'actuator_id': 'led', 'operation': 'set_color',
+               'params': {'rgb': [255, 0, 0]}},
+    },
+    {
+      'title': 'Watch <10 m → lights green',
+      'name': 'watch-near-green',
+      'when': {'key': 'proximity.v1',
+               'field': 'distance_m', 'max': 10},
+      'then': {'actuator_id': 'led', 'operation': 'set_color',
+               'params': {'rgb': [0, 255, 0]}},
+    },
+    {
+      'title': 'Person at laptop → lights yellow',
+      'name': 'person-at-laptop-yellow',
+      'when': {'key': 'prediction', 'not_equals': 'no_face'},
+      'then': {'actuator_id': 'led', 'operation': 'set_color',
+               'params': {'rgb': [255, 255, 0]}},
+    },
+    {
+      'title': 'Room occupied → phone notification',
+      'name': 'room-occupied-notify',
+      'when': {'key': 'occupancy.v1', 'equals': 'occupied'},
+      'then': {'actuator_id': 'notify', 'operation': 'notify',
+               'params': {'title': 'Thoth · room occupied',
+                          'body': 'Presence detected in the room'}},
+    },
+  ];
+
+  Future<void> _newRuleSheet() async {
+    final nameCtl = TextEditingController();
+    final whenCtl = TextEditingController(
+        text: const JsonEncoder.withIndent('  ').convert(
+            {'key': 'occupancy.v1', 'equals': 'occupied'}),);
+    final thenCtl = TextEditingController(
+        text: const JsonEncoder.withIndent('  ').convert(
+            {'actuator_id': 'notify', 'operation': 'notify',
+             'params': {'title': 'Thoth', 'body': ''}},),);
+    final coolCtl = TextEditingController(text: '0');
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => Padding(
+          padding: EdgeInsets.only(
+            left: 16, right: 16, top: 16,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,),
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('New automation rule',
+                    style: Theme.of(ctx).textTheme.titleMedium,),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8, runSpacing: 8,
+                  children: [
+                    for (final p in _presets)
+                      ActionChip(
+                        label: Text(p['title'] as String),
+                        onPressed: () => setS(() {
+                          nameCtl.text = p['name'] as String;
+                          whenCtl.text = const JsonEncoder.withIndent(
+                              '  ').convert(p['when']);
+                          thenCtl.text = const JsonEncoder.withIndent(
+                              '  ').convert(p['then']);
+                        },),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                TextField(controller: nameCtl,
+                    decoration: const InputDecoration(
+                        labelText: 'Rule name',
+                        border: OutlineInputBorder(),),),
+                const SizedBox(height: 8),
+                TextField(controller: whenCtl, maxLines: 4,
+                    style: const TextStyle(
+                        fontFamily: 'monospace', fontSize: 12,),
+                    decoration: const InputDecoration(
+                        labelText: 'when (JSON)',
+                        helperText:
+                            'key · entity_id · equals · not_equals · '
+                            'contains · field+min/max · min_confidence',
+                        border: OutlineInputBorder(),),),
+                const SizedBox(height: 8),
+                TextField(controller: thenCtl, maxLines: 6,
+                    style: const TextStyle(
+                        fontFamily: 'monospace', fontSize: 12,),
+                    decoration: const InputDecoration(
+                        labelText: 'then (JSON)',
+                        helperText: 'actuator_id "notify" = push '
+                            'notification to this phone',
+                        border: OutlineInputBorder(),),),
+                const SizedBox(height: 8),
+                TextField(controller: coolCtl,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                        labelText: 'cooldown seconds',
+                        border: OutlineInputBorder(),),),
+                const SizedBox(height: 12),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Save rule'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (saved != true) return;
+    try {
+      final when = json.decode(whenCtl.text);
+      final then = json.decode(thenCtl.text);
+      await BrainClient.instance.postV1('/automation/rules', body: {
+        'name': nameCtl.text.trim(),
+        'when': when, 'then': then,
+        'cooldown_s': double.tryParse(coolCtl.text) ?? 0,
+        'enabled': true,
+      },);
+      await _reload();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Save failed: $e')));
+      }
+    }
+  }
+
+  Future<void> _deleteRule(Map<String, dynamic> rule) async {
+    try {
+      await BrainClient.instance
+          .deleteV1('/automation/rules/${rule['name']}');
+      await _reload();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Delete failed: $e')));
+      }
+    }
+  }
+
   Future<void> _evaluate() async {
     try {
       final res = await BrainClient.instance.postV1('/automation/evaluate');
@@ -150,6 +302,12 @@ class _ActuatorsScreenState extends ConsumerState<ActuatorsScreen> {
               label: const Text('Evaluate now'),
               onPressed: _evaluate,
             ),
+            const SizedBox(width: 8),
+            FilledButton.icon(
+              icon: const Icon(Icons.add),
+              label: const Text('New rule'),
+              onPressed: _newRuleSheet,
+            ),
           ],),
           const SizedBox(height: 8),
           if (_rules.isEmpty)
@@ -157,7 +315,7 @@ class _ActuatorsScreenState extends ConsumerState<ActuatorsScreen> {
               padding: EdgeInsets.all(32),
               child: Center(
                 child: Text(
-                    'No automation rules yet.\nRules fire actuators when predictions/context change — create them in the portal.',
+                    'No automation rules yet.\nRules fire actuators when context changes — tap New rule to create one here.',
                     textAlign: TextAlign.center,),
               ),
             ),
@@ -173,6 +331,11 @@ class _ActuatorsScreenState extends ConsumerState<ActuatorsScreen> {
                   overflow: TextOverflow.ellipsis,
                   style:
                       const TextStyle(fontFamily: 'monospace', fontSize: 11),
+                ),
+                secondary: IconButton(
+                  icon: const Icon(Icons.delete_outline, size: 20),
+                  tooltip: 'Delete rule',
+                  onPressed: () => _deleteRule(r),
                 ),
                 value: r['enabled'] != false,
                 onChanged: (v) => _toggleRule(r, v),

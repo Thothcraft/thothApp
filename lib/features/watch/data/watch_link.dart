@@ -27,6 +27,9 @@ class WatchLink {
   bool _disposed = false;
   bool _connecting = false;
   Timer? _motionPollTimer;
+  Timer? _watchdog;
+  int _watchdogRx = 0;
+  int _watchdogMisses = 0;
   bool _stampedMotion = false;
   int _motionRx = 0;
   /// Stock InfiniTime stops sampling the BMA421 while dozing — reads
@@ -142,6 +145,7 @@ class WatchLink {
   Future<void> _connectLoop() async {
     if (_connecting || _disposed) return;
     _connecting = true;
+    var backoff = const Duration(seconds: 2);
     try {
       while (!_disposed) {
         try {
@@ -163,15 +167,48 @@ class WatchLink {
             }
           }
           await _subscribe().timeout(const Duration(seconds: 30));
+          _armWatchdog();
           return;
         } catch (_) {
           if (_disposed) return;
-          await Future<void>.delayed(const Duration(seconds: 2));
+          // Exponential-ish backoff capped at 30 s — a watch left
+          // overnight shouldn't get hammered every 2 s forever.
+          await Future<void>.delayed(backoff);
+          backoff = backoff * 2 > const Duration(seconds: 30)
+              ? const Duration(seconds: 30)
+              : backoff * 2;
         }
       }
     } finally {
       _connecting = false;
     }
+  }
+
+  /// Dead-link detector: with the stamped char OR the legacy poll the
+  /// link produces motion samples continuously — if `motionRx` stalls
+  /// for ~90 s while `isConnected` is true, the GATT session is wedged
+  /// (a state Android can sit in for hours); drop it so the connect
+  /// loop brings up a real one.
+  void _armWatchdog() {
+    _watchdog?.cancel();
+    _watchdogRx = _motionRx;
+    _watchdogMisses = 0;
+    _watchdog = Timer.periodic(const Duration(seconds: 30), (_) async {
+      if (_disposed || !device.isConnected) return;
+      if (_motionRx == _watchdogRx) {
+        _watchdogMisses++;
+        if (_watchdogMisses >= 3) {
+          debugPrint('[watch] telemetry silent — forcing reconnect');
+          _watchdogMisses = 0;
+          try {
+            await device.disconnect();
+          } catch (_) {}
+        }
+      } else {
+        _watchdogMisses = 0;
+        _watchdogRx = _motionRx;
+      }
+    });
   }
 
   Future<void> _subscribe() async {
@@ -428,6 +465,7 @@ class WatchLink {
 
   Future<void> dispose() async {
     _disposed = true;
+    _watchdog?.cancel();
     _motionPollTimer?.cancel();
     _motionPollTimer = null;
     await _connSub?.cancel();
