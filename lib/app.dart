@@ -6,11 +6,37 @@ import 'features/settings/application/app_settings.dart';
 import 'features/watch/application/watch_providers.dart';
 import 'routes/app_router.dart';
 
-class ThothcraftApp extends ConsumerWidget {
+class ThothcraftApp extends ConsumerStatefulWidget {
   const ThothcraftApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ThothcraftApp> createState() => _ThothcraftAppState();
+}
+
+class _ThothcraftAppState extends ConsumerState<ThothcraftApp>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    // Launch = foreground.
+    ObservationService.instance.appLifecycleChanged(foreground: true);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    ObservationService.instance
+        .appLifecycleChanged(foreground: state == AppLifecycleState.resumed);
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final themeMode = ref.watch(appSettingsProvider).valueOrNull?.themeMode ??
         ThemeMode.system;
     // Drive mobile evidence producers from the privacy toggles (Part 4/11).

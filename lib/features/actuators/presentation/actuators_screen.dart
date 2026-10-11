@@ -112,10 +112,10 @@ class _ActuatorsScreenState extends ConsumerState<ActuatorsScreen> {
     {
       'title': 'Room occupied → phone notification',
       'name': 'room-occupied-notify',
-      'when': {'key': 'occupancy.v1', 'equals': 'occupied'},
+      'when': {'key': 'occupancy.v1', 'contains': {'occupied': true}},
       'then': {'actuator_id': 'notify', 'operation': 'notify',
                'params': {'title': 'Thoth · room occupied',
-                          'body': 'Presence detected in the room'}},
+                          'body': 'Presence detected in the room'},},
     },
   ];
 
@@ -123,7 +123,8 @@ class _ActuatorsScreenState extends ConsumerState<ActuatorsScreen> {
     final nameCtl = TextEditingController();
     final whenCtl = TextEditingController(
         text: const JsonEncoder.withIndent('  ').convert(
-            {'key': 'occupancy.v1', 'equals': 'occupied'}),);
+            {'key': 'occupancy.v1',
+             'contains': {'occupied': true}}),);
     final thenCtl = TextEditingController(
         text: const JsonEncoder.withIndent('  ').convert(
             {'actuator_id': 'notify', 'operation': 'notify',
@@ -173,7 +174,8 @@ class _ActuatorsScreenState extends ConsumerState<ActuatorsScreen> {
                         labelText: 'when (JSON)',
                         helperText:
                             'key · entity_id · equals · not_equals · '
-                            'contains · field+min/max · min_confidence',
+                            'contains · field+min/max · min_confidence · '
+                            'expr (whispy rule language over state values)',
                         border: OutlineInputBorder(),),),
                 const SizedBox(height: 8),
                 TextField(controller: thenCtl, maxLines: 6,

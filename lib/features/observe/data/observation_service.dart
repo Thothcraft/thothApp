@@ -369,6 +369,27 @@ class ObservationService {
     }
   }
 
+  // ── App lifecycle → app.focus.v1 state ──────────────────────────────
+
+  /// Posted on every foreground/background transition (and once at
+  /// start-up) so the context map — and therefore the agent — knows
+  /// whether Thothcraft is the open app on this phone.
+  void appLifecycleChanged({required bool foreground}) {
+    final ent = PhoneRelay.instance.deviceUuid != null
+        ? 'device:${PhoneRelay.instance.deviceUuid}'
+        : observerId;
+    unawaited(_repo
+        .postState(
+          stateKey: 'app.focus.v1',
+          entityId: ent,
+          value: {'app': 'thothcraft', 'foreground': foreground},
+          transition: foreground ? 'enter' : 'exit',
+          estimator: 'mobile.lifecycle',
+          confidence: 1.0,
+        )
+        .catchError((Object e) => debugPrint('[observe] focus state: $e'),),);
+  }
+
   /// Flush the pending batch to ``/v1/context/evidence`` — idempotent via
   /// per-item ``external_id`` so retries never double-count.
   Future<int> flush() async {
