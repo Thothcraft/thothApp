@@ -24,14 +24,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   final List<_Msg> _msgs = [];
   final List<ChatAttachment> _pending = [];
   bool _sending = false;
-  // Model pick sent to /v1/chat — the hub maps '4'→gpt-4o-class,
-  // '5'→gpt-5, '6'→gpt-6 (env-overridable server-side).
+  // Model pick sent to /v1/chat — the hub maps '4'→gpt-4o,
+  // '5'→gpt-4.1, '6'→gpt-5 (env-overridable server-side).
   String _model = '4';
 
   static const _modelChoices = {
     '4': '4 · gpt-4o',
-    '5': '5 · gpt-5',
-    '6': '6 · gpt-6',
+    '5': '5 · gpt-4.1',
+    '6': '6 · gpt-5',
   };
 
   static const _suggestions = [
@@ -62,7 +62,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     _scrollToEnd();
     try {
       final history = _msgs
-          .where((m) => !m.thinking && m.content.isNotEmpty)
+          .where((m) =>
+              !m.thinking && !m.isError && m.content.isNotEmpty)
           .map((m) => ChatTurn(
               role: m.isUser ? 'user' : 'assistant', content: m.content,),)
           .toList();
