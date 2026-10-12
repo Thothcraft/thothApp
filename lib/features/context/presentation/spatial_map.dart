@@ -307,6 +307,8 @@ class _SpatialMapViewState extends State<SpatialMapView> {
                         widget.edges,
                         _top,
                         _labelFor,
+                        labelColor: Theme.of(context).colorScheme.onSurface,
+                        mutedLabelColor: Theme.of(context).colorScheme.onSurfaceVariant,
                         trace: _traceEnu(selected),
                       ),
                     ),
@@ -768,6 +770,8 @@ class _SpatialPainter extends CustomPainter {
     this.edges,
     this.top,
     this.labelFor, {
+    required this.labelColor,
+    required this.mutedLabelColor,
     this.trace = const [],
   });
   final List<SpatialRoom> rooms;
@@ -776,6 +780,8 @@ class _SpatialPainter extends CustomPainter {
   final List<BleRelation> edges;
   final bool top;
   final String Function(String) labelFor;
+  final Color labelColor;
+  final Color mutedLabelColor;
 
   /// GPS breadcrumb in ENU (+ watch-link RSSI per fix for colouring).
   final List<({List<double> enu, int? rssi})> trace;
@@ -1076,7 +1082,7 @@ class _SpatialPainter extends CustomPainter {
         c + const Offset(12, -14),
         12,
         bold: true,
-        color: p.known ? Colors.black87 : Colors.grey,
+        color: p.known ? labelColor : mutedLabelColor,
       );
       final sub = p.estimated
           ? '±${p.uncertaintyM.toStringAsFixed(1)}m · ${p.anchorCount} anchors'
@@ -1086,7 +1092,7 @@ class _SpatialPainter extends CustomPainter {
               '+${p.enu[2].toStringAsFixed(1)}m',
               if (p.sensing) 'FOV',
             ].join(' · ');
-      _text(canvas, sub, c + const Offset(12, 0), 10, color: Colors.black54);
+      _text(canvas, sub, c + const Offset(12, 0), 10, color: mutedLabelColor);
     }
 
     _legend(canvas, size);
@@ -1127,7 +1133,7 @@ class _SpatialPainter extends CustomPainter {
       '▣ anchored node   ◉ person device   ○ radio located',
       Offset(x, y),
       10,
-      color: Colors.black54,
+      color: mutedLabelColor,
     );
     y += 14;
     _text(
@@ -1135,7 +1141,7 @@ class _SpatialPainter extends CustomPainter {
       '— teal BLE · indigo Wi-Fi · purple CSI   -- dashed = estimate',
       Offset(x, y),
       10,
-      color: Colors.black54,
+      color: mutedLabelColor,
     );
     // North arrow + 1 m scale bar (top-right).
     final nTop = Offset(size.width - 42, 26), nBot = nTop + const Offset(0, 22);
@@ -1143,18 +1149,19 @@ class _SpatialPainter extends CustomPainter {
       nBot,
       nTop,
       Paint()
-        ..color = Colors.black54
+        ..color = mutedLabelColor
         ..strokeWidth = 1.6,
     );
-    canvas.drawCircle(nTop, 2.6, Paint()..color = Colors.black54);
-    _text(canvas, 'N', nTop + const Offset(-3, -14), 11, bold: true);
+    canvas.drawCircle(nTop, 2.6, Paint()..color = mutedLabelColor);
+    _text(canvas, 'N', nTop + const Offset(-3, -14), 11, bold: true,
+        color: labelColor);
     // A horizontal metre projects to ~0.86×scale px in the iso view.
     final meter = _scale * (top ? 1.0 : 0.86);
     canvas.drawLine(
       Offset(size.width - 18, size.height - 20),
       Offset(size.width - 18 - meter, size.height - 20),
       Paint()
-        ..color = Colors.black87
+        ..color = labelColor
         ..strokeWidth = 2,
     );
     _text(
@@ -1162,6 +1169,7 @@ class _SpatialPainter extends CustomPainter {
       '1 m',
       Offset(size.width - 18 - meter / 2 - 8, size.height - 34),
       10,
+      color: labelColor,
     );
   }
 

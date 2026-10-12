@@ -43,8 +43,9 @@ class EntityDetailScreen extends ConsumerWidget {
                     data: (list) {
                       final live = list.where((s) => s.active).toList();
                       if (live.isEmpty) {
-                        return const Text('No active context.',
-                            style: TextStyle(color: Colors.black54),);
+                        return Text('No active context.',
+                            style: TextStyle(color: Theme.of(context)
+                                .colorScheme.onSurfaceVariant),);
                       }
                       return Column(children: [
                         for (final s in live)
@@ -111,17 +112,19 @@ class EntityDetailScreen extends ConsumerWidget {
                     Text('Evidence',
                         style: Theme.of(context).textTheme.titleMedium,),
                     const SizedBox(height: 4),
-                    const Text(
+                    Text(
                         'Observations and predictions supporting the '
                         'context above — evidence is not asserted truth.',
-                        style: TextStyle(fontSize: 11, color: Colors.black45),),
+                        style: TextStyle(fontSize: 11, color: Theme.of(context)
+                            .colorScheme.onSurfaceVariant),),
                     const SizedBox(height: 8),
                     evidence.when(
                       loading: () => const LinearProgressIndicator(),
                       error: (e, _) => Text('$e'),
                       data: (list) => list.isEmpty
-                          ? const Text('No evidence yet.',
-                              style: TextStyle(color: Colors.black54),)
+                          ? Text('No evidence yet.',
+                              style: TextStyle(color: Theme.of(context)
+                                  .colorScheme.onSurfaceVariant),)
                           : Column(children: [
                               for (final ev in list.take(10))
                                 ListTile(
@@ -159,8 +162,9 @@ class EntityDetailScreen extends ConsumerWidget {
                       loading: () => const LinearProgressIndicator(),
                       error: (e, _) => Text('$e'),
                       data: (list) => list.isEmpty
-                          ? const Text('No transitions recorded.',
-                              style: TextStyle(color: Colors.black54),)
+                          ? Text('No transitions recorded.',
+                              style: TextStyle(color: Theme.of(context)
+                                  .colorScheme.onSurfaceVariant),)
                           : Column(children: [
                               for (final ev in list.take(20))
                                 ListTile(

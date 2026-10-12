@@ -74,6 +74,14 @@ class _LayoutEditorScreenState extends State<LayoutEditorScreen> {
         .toList();
   }
 
+  List<Map<String, dynamic>> _roomPersons() =>
+      (_doc!['persons'] as List? ?? const [])
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .where((p) => '${p['room_id'] ?? _doc!['room_id'] ?? ''}' == _roomId
+              && p['pos'] is List && (p['pos'] as List).length >= 3)
+          .toList();
+
   Future<void> _load() async {
     try {
       final d =
@@ -115,11 +123,28 @@ class _LayoutEditorScreenState extends State<LayoutEditorScreen> {
     return best;
   }
 
+  Map<String, dynamic>? _personAt(Offset px) {
+    for (final person in _roomPersons().reversed) {
+      final p = person['pos'] as List;
+      if ((_tx.p(Offset((p[0] as num).toDouble(),
+              (p[2] as num).toDouble())) - px).distance < 24) return person;
+    }
+    return null;
+  }
+
   void _onPanStart(DragStartDetails d) {
     final hit = _deviceAt(d.localPosition);
     if (hit != null) {
       setState(() {
         _dragId = '${hit['device_id']}';
+        _dragPos = d.localPosition;
+      });
+      return;
+    }
+    final person = _personAt(d.localPosition);
+    if (person != null) {
+      setState(() {
+        _dragId = 'person:${person['person_id']}';
         _dragPos = d.localPosition;
       });
     }
@@ -130,13 +155,16 @@ class _LayoutEditorScreenState extends State<LayoutEditorScreen> {
     if (id == null) return;
     setState(() {
       _dragPos = d.localPosition;
-      final dev = (_doc!['devices'] as List)
-          .firstWhere((x) => '${x['device_id']}' == id);
       final w = _tx.inv(d.localPosition);
       final dims = _room['dims'] as Map? ?? {};
       final hw = ((dims['w'] as num?)?.toDouble() ?? 5) / 2 - 0.05;
       final hd = ((dims['d'] as num?)?.toDouble() ?? 5) / 2 - 0.05;
-      final p = dev['pos'] as List;
+      final isPerson = id.startsWith('person:');
+      final rows = isPerson ? (_doc!['persons'] as List) : (_doc!['devices'] as List);
+      final row = rows.firstWhere((x) => isPerson
+          ? '${x['person_id']}' == id.substring('person:'.length)
+          : '${x['device_id']}' == id);
+      final p = row['pos'] as List;
       p[0] = w.dx.clamp(-hw, hw);
       p[2] = w.dy.clamp(-hd, hd);
     });
@@ -207,6 +235,34 @@ class _LayoutEditorScreenState extends State<LayoutEditorScreen> {
         });
         _roomId = id;
       });
+    });
+  }
+
+  Future<void> _addPerson() async {
+    final ctl = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Place a person'),
+        content: TextField(controller: ctl, autofocus: true,
+            decoration: const InputDecoration(hintText: 'person name')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(c, ctl.text.trim()), child: const Text('Place')),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty || !mounted) return;
+    final label = name.trim();
+    final id = label.startsWith('person:')
+        ? label
+        : 'person:${label.replaceAll(RegExp(r'\s+'), '_')}';
+    setState(() {
+      final people = (_doc!['persons'] ??= []) as List;
+      if (!people.any((p) => '${p['person_id']}' == id)) {
+        people.add({'person_id': id, 'name': label, 'pos': [0.0, 0.0, 0.0],
+          'room_id': _roomId});
+      }
     });
   }
 
@@ -781,6 +837,11 @@ class _LayoutEditorScreenState extends State<LayoutEditorScreen> {
                   icon: const Icon(Icons.add_location_alt_outlined),
                   onPressed: _addDevice,
                 ),
+                IconButton(
+                  tooltip: 'Place person',
+                  icon: const Icon(Icons.person_add_alt_1_outlined),
+                  onPressed: _addPerson,
+                ),
               ],
             ),
           ),
@@ -816,9 +877,11 @@ class _LayoutEditorScreenState extends State<LayoutEditorScreen> {
                           painter: _PlanPainter(
                             room,
                             devices,
+                            _roomPersons(),
                             _tx,
                             _dragId,
                             _dragPos,
+                            Theme.of(context).colorScheme.onSurface,
                           ),
                         ),
                       );
@@ -833,14 +896,14 @@ class _LayoutEditorScreenState extends State<LayoutEditorScreen> {
                 style: TextStyle(color: Theme.of(context).colorScheme.error),
               ),
             ),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(12, 0, 12, 10),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
             child: Text(
-              'Drag a device to move it · tap one for height, '
-              'rotation and sensor fields of view · saves to the same '
-              'layout the radio map reads.',
+              'Drag devices and people to move them · tap a device for height, '
+              'rotation and sensor fields of view · saves to the shared room layout.',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 11, color: Colors.black54),
+              style: TextStyle(fontSize: 11,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
           ),
         ],
@@ -858,12 +921,15 @@ class _Tx {
 }
 
 class _PlanPainter extends CustomPainter {
-  _PlanPainter(this.room, this.devices, this.tx, this.dragId, this.dragPos);
+  _PlanPainter(this.room, this.devices, this.persons, this.tx, this.dragId,
+      this.dragPos, this.labelColor);
   final Map<String, dynamic> room;
   final List<Map<String, dynamic>> devices;
+  final List<Map<String, dynamic>> persons;
   final _Tx tx;
   final String? dragId;
   final Offset dragPos;
+  final Color labelColor;
 
   void _text(
     Canvas c,
@@ -1024,6 +1090,19 @@ class _PlanPainter extends CustomPainter {
         9,
         color: Colors.black54,
       );
+    }
+
+    for (final person in persons) {
+      final id = 'person:${person['person_id']}';
+      final p = person['pos'] as List;
+      final at = id == dragId ? dragPos : tx.p(Offset(
+          (p[0] as num).toDouble(), (p[2] as num).toDouble()));
+      canvas.drawCircle(at, 12, Paint()..color = const Color(0xFFC96F3F));
+      canvas.drawCircle(at, 12, Paint()..color = Colors.white
+        ..style = PaintingStyle.stroke..strokeWidth = 1.5);
+      _text(canvas, '${person['name'] ?? person['person_id']}',
+          at + const Offset(16, -7), 11, bold: true,
+          color: labelColor);
     }
   }
 

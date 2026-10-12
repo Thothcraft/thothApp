@@ -93,10 +93,11 @@ class _DescriptorList extends StatelessWidget {
     return SizedBox(
       height: 150,
       child: ListView(children: [
-        const Padding(
-          padding: EdgeInsets.fromLTRB(12, 8, 12, 4),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
           child: Text('Live links · radio · signal strength · freshness',
-              style: TextStyle(fontSize: 12, color: Colors.black45),),
+              style: TextStyle(fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant),),
         ),
         for (final e in edges)
           ListTile(
@@ -116,7 +117,8 @@ class _DescriptorList extends StatelessWidget {
           const Padding(
             padding: EdgeInsets.all(12),
             child: Text('No radio links yet — nodes above are placed devices.',
-                style: TextStyle(fontSize: 11, color: Colors.black45),),
+                style: TextStyle(fontSize: 11,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant),),
           ),
       ],),
     );

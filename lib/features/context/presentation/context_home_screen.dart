@@ -310,7 +310,8 @@ class _EventRow extends StatelessWidget {
         style: const TextStyle(fontSize: 13),
       ),
       subtitle: Text('${event.key} · $when',
-          style: const TextStyle(fontSize: 11, color: Colors.black45),),
+          style: TextStyle(fontSize: 11,
+              color: Theme.of(context).colorScheme.onSurfaceVariant),),
     );
   }
 }
@@ -333,10 +334,8 @@ class _EmptyCard extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Text(text,
-              style: Theme.of(context)
-                  .textTheme
-                  .bodySmall
-                  ?.copyWith(color: Colors.black54),),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant),),
         ),
       );
 }
