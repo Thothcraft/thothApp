@@ -41,6 +41,14 @@ class ObservationService {
   String? _lastError;
   bool _running = false;
 
+  /// Cancellation generation for the duty-cycled BLE loop — `stop()`
+  /// bumps it so an old loop sleeping between scans exits instead of
+  /// waking up and re-scanning after a reconfigure. `configure()` calls
+  /// are serialized through [_configureLock] so a second call can't set
+  /// `_running` back to true underneath the first one's `stop()`.
+  int _bleGeneration = 0;
+  Future<void>? _configureLock;
+
   /// Whether BLE RSSI evidence is enabled — also gates watch-relayed
   /// sightings (same privacy semantics as the phone's own scan).
   bool _bleEnabled = false;
@@ -83,6 +91,29 @@ class ObservationService {
     Set<String>? targets,
     String? observer,
     List<GeoZone>? geoZones,
+  }) {
+    final prev = _configureLock;
+    final task = (prev ?? Future<void>.value()).then(
+      (_) => _configure(
+        bleRssi: bleRssi,
+        gps: gps,
+        motion: motion,
+        targets: targets,
+        observer: observer,
+        geoZones: geoZones,
+      ),
+    );
+    _configureLock = task.catchError((_) {});
+    return task;
+  }
+
+  Future<void> _configure({
+    required bool bleRssi,
+    required bool gps,
+    required bool motion,
+    Set<String>? targets,
+    String? observer,
+    List<GeoZone>? geoZones,
   }) async {
     if (targets != null) {
       knownTargets
@@ -113,6 +144,7 @@ class ObservationService {
 
   Future<void> stop() async {
     _running = false;
+    _bleGeneration++; // kill any BLE loop sleeping between cycles
     await _bleSub?.cancel();
     _bleSub = null;
     await _gpsSub?.cancel();
@@ -137,14 +169,19 @@ class ObservationService {
       ].request();
       if (!granted.values.every((s) => s.isGranted)) return;
     }
-    // Duty-cycle: scan a short window each cycle.
-    unawaited(_bleLoop());
+    // Duty-cycle: scan a short window each cycle. The generation is
+    // captured now — if stop()/configure() runs while the loop sleeps,
+    // it exits at the next await instead of resuming against the new
+    // configuration.
+    unawaited(_bleLoop(_bleGeneration));
   }
 
-  Future<void> _bleLoop() async {
-    while (_running) {
+  Future<void> _bleLoop(int generation) async {
+    bool alive() => _running && generation == _bleGeneration;
+    while (alive()) {
       _rssiByTarget.clear();
       await _bleSub?.cancel();
+      if (!alive()) return;
       _bleSub = fbp.FlutterBluePlus.scanResults.listen((results) {
         for (final r in results) {
           final id = r.device.remoteId.str;
@@ -172,6 +209,7 @@ class ObservationService {
         break;
       }
       await Future<void>.delayed(bleWindow + const Duration(seconds: 2));
+      if (!alive()) return;
       for (final e in _rssiByTarget.entries) {
         PhoneRelay.instance.submitBleSighting(
           addr: e.key,
