@@ -15,7 +15,8 @@ class FeaturesScreen extends StatefulWidget {
   State<FeaturesScreen> createState() => _FeaturesScreenState();
 }
 
-class _FeaturesScreenState extends State<FeaturesScreen> with SingleTickerProviderStateMixin {
+class _FeaturesScreenState extends State<FeaturesScreen>
+    with SingleTickerProviderStateMixin {
   late TabController _tabController;
 
   @override
@@ -77,7 +78,9 @@ class _FeaturesScreenState extends State<FeaturesScreen> with SingleTickerProvid
                     children: [
                       _buildProductImage('assets/images/products/white_bg.jpg'),
                       _buildProductImage('assets/images/products/closeup.jpg'),
-                      _buildProductImage('assets/images/products/lifestyle.jpg'),
+                      _buildProductImage(
+                        'assets/images/products/lifestyle.jpg',
+                      ),
                     ],
                   ),
                 ),
@@ -199,17 +202,33 @@ class _FeaturesScreenState extends State<FeaturesScreen> with SingleTickerProvid
                     if (constraints.maxWidth > 600) {
                       return Row(
                         children: [
-                          Expanded(child: _buildDemoCard('Complete Overview', 'Full walkthrough of Thoth\'s capabilities and features.', 'assets/videos/first.mp4')),
+                          Expanded(
+                            child: _buildDemoCard(
+                              'Complete Overview',
+                              'Full walkthrough of Thoth\'s capabilities and features.',
+                            ),
+                          ),
                           const SizedBox(width: 16),
-                          Expanded(child: _buildDemoCard('Sensor Integration', 'Deep dive into our comprehensive sensor array.', 'assets/videos/sensors.mp4')),
+                          Expanded(
+                            child: _buildDemoCard(
+                              'Sensor Integration',
+                              'Deep dive into our comprehensive sensor array.',
+                            ),
+                          ),
                         ],
                       );
                     }
                     return Column(
                       children: [
-                        _buildDemoCard('Complete Overview', 'Full walkthrough of Thoth\'s capabilities and features.', 'assets/videos/first.mp4'),
+                        _buildDemoCard(
+                          'Complete Overview',
+                          'Full walkthrough of Thoth\'s capabilities and features.',
+                        ),
                         const SizedBox(height: 16),
-                        _buildDemoCard('Sensor Integration', 'Deep dive into our comprehensive sensor array.', 'assets/videos/sensors.mp4'),
+                        _buildDemoCard(
+                          'Sensor Integration',
+                          'Deep dive into our comprehensive sensor array.',
+                        ),
                       ],
                     );
                   },
@@ -263,12 +282,14 @@ class _FeaturesScreenState extends State<FeaturesScreen> with SingleTickerProvid
                 children: [
                   Text(
                     'Precision Data Collection',
-                    style: AppTextStyles.h2.copyWith(color: AppColors.textPrimaryLight),
+                    style: AppTextStyles.h2
+                        .copyWith(color: AppColors.textPrimaryLight),
                   ),
                   const SizedBox(height: 16),
                   Text(
                     'Powered by Raspberry Pi Sense HAT: capture temperature, humidity, pressure, and motion data in real-time. Features WiFi captive portal for instant headless setup and PiSugar for portable power management.',
-                    style: AppTextStyles.bodyMedium.copyWith(color: AppColors.textSecondaryLight),
+                    style: AppTextStyles.bodyMedium
+                        .copyWith(color: AppColors.textSecondaryLight),
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 32),
@@ -290,9 +311,21 @@ class _FeaturesScreenState extends State<FeaturesScreen> with SingleTickerProvid
       mainAxisSpacing: 16,
       childAspectRatio: 3,
       children: [
-        _buildSensorItem(Icons.thermostat, 'Sense HAT Environmental', 'Temperature, humidity, pressure via Sense HAT'),
-        _buildSensorItem(Icons.explore, 'IMU Motion Tracking', '9-DOF IMU: accelerometer, gyroscope, compass'),
-        _buildSensorItem(Icons.battery_charging_full, 'Power Management', 'PiSugar battery with real-time monitoring'),
+        _buildSensorItem(
+          Icons.thermostat,
+          'Sense HAT Environmental',
+          'Temperature, humidity, pressure via Sense HAT',
+        ),
+        _buildSensorItem(
+          Icons.explore,
+          'IMU Motion Tracking',
+          '9-DOF IMU: accelerometer, gyroscope, compass',
+        ),
+        _buildSensorItem(
+          Icons.battery_charging_full,
+          'Power Management',
+          'PiSugar battery with real-time monitoring',
+        ),
       ],
     );
   }
@@ -307,9 +340,17 @@ class _FeaturesScreenState extends State<FeaturesScreen> with SingleTickerProvid
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text(title, style: AppTextStyles.h4.copyWith(color: AppColors.textPrimaryLight)),
+              Text(
+                title,
+                style: AppTextStyles.h4
+                    .copyWith(color: AppColors.textPrimaryLight),
+              ),
               const SizedBox(height: 4),
-              Text(description, style: AppTextStyles.bodySmall.copyWith(color: AppColors.textSecondaryLight)),
+              Text(
+                description,
+                style: AppTextStyles.bodySmall
+                    .copyWith(color: AppColors.textSecondaryLight),
+              ),
             ],
           ),
         ),
@@ -327,12 +368,14 @@ class _FeaturesScreenState extends State<FeaturesScreen> with SingleTickerProvid
             children: [
               Text(
                 'Ubiquitous Access',
-                style: AppTextStyles.h2.copyWith(color: AppColors.textPrimaryLight),
+                style: AppTextStyles.h2
+                    .copyWith(color: AppColors.textPrimaryLight),
               ),
               const SizedBox(height: 16),
               Text(
                 'Multi-platform control (web/desktop/mobile/Chrome/voice/SMS) with Obsidian note-taking. Your data and ideas flow anywhere, organized as a personal knowledge hub.',
-                style: AppTextStyles.bodyMedium.copyWith(color: AppColors.textSecondaryLight),
+                style: AppTextStyles.bodyMedium
+                    .copyWith(color: AppColors.textSecondaryLight),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 32),
@@ -369,7 +412,8 @@ class _FeaturesScreenState extends State<FeaturesScreen> with SingleTickerProvid
             Expanded(
               child: Text(
                 interface['title'] as String,
-                style: AppTextStyles.bodyMedium.copyWith(color: AppColors.textPrimaryLight),
+                style: AppTextStyles.bodyMedium
+                    .copyWith(color: AppColors.textPrimaryLight),
               ),
             ),
           ],
@@ -390,18 +434,26 @@ class _FeaturesScreenState extends State<FeaturesScreen> with SingleTickerProvid
                 children: [
                   Text(
                     'Deep Learning & Collaboration',
-                    style: AppTextStyles.h2.copyWith(color: AppColors.textPrimaryLight),
+                    style: AppTextStyles.h2
+                        .copyWith(color: AppColors.textPrimaryLight),
                   ),
                   const SizedBox(height: 16),
                   Text(
                     'Train models on-device or federated across Thoths. Multi-device sync with differential privacy protects sensitive data while enabling global teamwork.',
-                    style: AppTextStyles.bodyMedium.copyWith(color: AppColors.textSecondaryLight),
+                    style: AppTextStyles.bodyMedium
+                        .copyWith(color: AppColors.textSecondaryLight),
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 32),
-                  _buildFeatureCard('Federated Learning', 'Collaborate across multiple devices while keeping data private'),
+                  _buildFeatureCard(
+                    'Federated Learning',
+                    'Collaborate across multiple devices while keeping data private',
+                  ),
                   const SizedBox(height: 16),
-                  _buildFeatureCard('Differential Privacy', 'Protect sensitive information during collaborative research'),
+                  _buildFeatureCard(
+                    'Differential Privacy',
+                    'Protect sensitive information during collaborative research',
+                  ),
                 ],
               ),
             ),
@@ -423,12 +475,14 @@ class _FeaturesScreenState extends State<FeaturesScreen> with SingleTickerProvid
                 children: [
                   Text(
                     'Curriculum-Ready',
-                    style: AppTextStyles.h2.copyWith(color: AppColors.textPrimaryLight),
+                    style: AppTextStyles.h2
+                        .copyWith(color: AppColors.textPrimaryLight),
                   ),
                   const SizedBox(height: 16),
                   Text(
                     'Pre-built lessons on AI/IoT, from basics to advanced. Pitch to students: \'Build, learn, share\'—with guided projects for immediate impact.',
-                    style: AppTextStyles.bodyMedium.copyWith(color: AppColors.textSecondaryLight),
+                    style: AppTextStyles.bodyMedium
+                        .copyWith(color: AppColors.textSecondaryLight),
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 32),
@@ -450,9 +504,21 @@ class _FeaturesScreenState extends State<FeaturesScreen> with SingleTickerProvid
       mainAxisSpacing: 24,
       childAspectRatio: 2,
       children: [
-        _buildEducationItem(Icons.book, 'Structured Curriculum', 'Week-long projects from beginner to advanced'),
-        _buildEducationItem(Icons.extension, 'Hands-on Projects', 'Build real AI/IoT applications'),
-        _buildEducationItem(Icons.people, 'Collaborative Learning', 'Share and learn from peers'),
+        _buildEducationItem(
+          Icons.book,
+          'Structured Curriculum',
+          'Week-long projects from beginner to advanced',
+        ),
+        _buildEducationItem(
+          Icons.extension,
+          'Hands-on Projects',
+          'Build real AI/IoT applications',
+        ),
+        _buildEducationItem(
+          Icons.people,
+          'Collaborative Learning',
+          'Share and learn from peers',
+        ),
       ],
     );
   }
@@ -462,9 +528,18 @@ class _FeaturesScreenState extends State<FeaturesScreen> with SingleTickerProvid
       children: [
         Icon(icon, size: 64, color: AppColors.primaryBlue),
         const SizedBox(height: 12),
-        Text(title, style: AppTextStyles.h4.copyWith(color: AppColors.textPrimaryLight), textAlign: TextAlign.center),
+        Text(
+          title,
+          style: AppTextStyles.h4.copyWith(color: AppColors.textPrimaryLight),
+          textAlign: TextAlign.center,
+        ),
         const SizedBox(height: 8),
-        Text(description, style: AppTextStyles.bodySmall.copyWith(color: AppColors.textSecondaryLight), textAlign: TextAlign.center),
+        Text(
+          description,
+          style: AppTextStyles.bodySmall
+              .copyWith(color: AppColors.textSecondaryLight),
+          textAlign: TextAlign.center,
+        ),
       ],
     );
   }
@@ -480,17 +555,37 @@ class _FeaturesScreenState extends State<FeaturesScreen> with SingleTickerProvid
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 32),
-          _buildUseCaseCard(Icons.school, 'Students', 'Boost productivity with AI-assisted notes and hands-on learning experiences', Colors.blue),
+          _buildUseCaseCard(
+            Icons.school,
+            'Students',
+            'Boost productivity with AI-assisted notes and hands-on learning experiences',
+            Colors.blue,
+          ),
           const SizedBox(height: 16),
-          _buildUseCaseCard(Icons.science, 'Researchers', 'Scale experiments ethically with federated learning and privacy protection', Colors.green),
+          _buildUseCaseCard(
+            Icons.science,
+            'Researchers',
+            'Scale experiments ethically with federated learning and privacy protection',
+            Colors.green,
+          ),
           const SizedBox(height: 16),
-          _buildUseCaseCard(Icons.build, 'Makers', 'Hack and collaborate endlessly with open-source extensibility', Colors.orange),
+          _buildUseCaseCard(
+            Icons.build,
+            'Makers',
+            'Hack and collaborate endlessly with open-source extensibility',
+            Colors.orange,
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildUseCaseCard(IconData icon, String title, String description, Color color) {
+  Widget _buildUseCaseCard(
+    IconData icon,
+    String title,
+    String description,
+    Color color,
+  ) {
     return GlassCard(
       child: Container(
         padding: const EdgeInsets.all(24),
@@ -513,9 +608,17 @@ class _FeaturesScreenState extends State<FeaturesScreen> with SingleTickerProvid
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: AppTextStyles.h4.copyWith(color: AppColors.textPrimaryLight)),
+                  Text(
+                    title,
+                    style: AppTextStyles.h4
+                        .copyWith(color: AppColors.textPrimaryLight),
+                  ),
                   const SizedBox(height: 8),
-                  Text(description, style: AppTextStyles.bodySmall.copyWith(color: AppColors.textSecondaryLight)),
+                  Text(
+                    description,
+                    style: AppTextStyles.bodySmall
+                        .copyWith(color: AppColors.textSecondaryLight),
+                  ),
                 ],
               ),
             ),
@@ -536,11 +639,26 @@ class _FeaturesScreenState extends State<FeaturesScreen> with SingleTickerProvid
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 32),
-          _buildPlanCard('Free', '\$0/mo', 'For entry-level exploration and learning', false),
+          _buildPlanCard(
+            'Free',
+            '\$0/mo',
+            'For entry-level exploration and learning',
+            false,
+          ),
           const SizedBox(height: 16),
-          _buildPlanCard('Paid', '\$9.99/mo', 'For power users and dedicated researchers', true),
+          _buildPlanCard(
+            'Paid',
+            '\$9.99/mo',
+            'For power users and dedicated researchers',
+            true,
+          ),
           const SizedBox(height: 16),
-          _buildPlanCard('Organization', 'Custom', 'For teams with institutional discounts', false),
+          _buildPlanCard(
+            'Organization',
+            'Custom',
+            'For teams with institutional discounts',
+            false,
+          ),
           const SizedBox(height: 32),
           SizedBox(
             width: double.infinity,
@@ -557,7 +675,12 @@ class _FeaturesScreenState extends State<FeaturesScreen> with SingleTickerProvid
     );
   }
 
-  Widget _buildPlanCard(String title, String price, String description, bool featured) {
+  Widget _buildPlanCard(
+    String title,
+    String price,
+    String description,
+    bool featured,
+  ) {
     return GlassCard(
       child: Container(
         padding: const EdgeInsets.all(24),
@@ -576,27 +699,39 @@ class _FeaturesScreenState extends State<FeaturesScreen> with SingleTickerProvid
                 Text(
                   title,
                   style: AppTextStyles.h3.copyWith(
-                    color: featured ? AppColors.primaryBlue : AppColors.textPrimaryLight,
+                    color: featured
+                        ? AppColors.primaryBlue
+                        : AppColors.textPrimaryLight,
                   ),
                 ),
                 if (featured)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
                       color: AppColors.primaryBlue,
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
                       'Popular',
-                      style: AppTextStyles.labelSmall.copyWith(color: Colors.white),
+                      style: AppTextStyles.labelSmall
+                          .copyWith(color: Colors.white),
                     ),
                   ),
               ],
             ),
             const SizedBox(height: 8),
-            Text(price, style: AppTextStyles.h2.copyWith(color: AppColors.textPrimaryLight)),
+            Text(
+              price,
+              style:
+                  AppTextStyles.h2.copyWith(color: AppColors.textPrimaryLight),
+            ),
             const SizedBox(height: 8),
-            Text(description, style: AppTextStyles.bodySmall.copyWith(color: AppColors.textSecondaryLight)),
+            Text(
+              description,
+              style: AppTextStyles.bodySmall
+                  .copyWith(color: AppColors.textSecondaryLight),
+            ),
           ],
         ),
       ),
@@ -610,9 +745,17 @@ class _FeaturesScreenState extends State<FeaturesScreen> with SingleTickerProvid
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: AppTextStyles.h4.copyWith(color: AppColors.textPrimaryLight)),
+            Text(
+              title,
+              style:
+                  AppTextStyles.h4.copyWith(color: AppColors.textPrimaryLight),
+            ),
             const SizedBox(height: 8),
-            Text(description, style: AppTextStyles.bodySmall.copyWith(color: AppColors.textSecondaryLight)),
+            Text(
+              description,
+              style: AppTextStyles.bodySmall
+                  .copyWith(color: AppColors.textSecondaryLight),
+            ),
           ],
         ),
       ),
@@ -624,45 +767,71 @@ class _FeaturesScreenState extends State<FeaturesScreen> with SingleTickerProvid
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: DataTable(
-          headingRowColor: WidgetStateProperty.all(AppColors.backgroundSecondaryLight),
+          headingRowColor:
+              WidgetStateProperty.all(AppColors.backgroundSecondaryLight),
           columns: const [
-            DataColumn(label: Text('Feature', style: TextStyle(fontWeight: FontWeight.w600))),
-            DataColumn(label: Text('Thoth', style: TextStyle(fontWeight: FontWeight.w600))),
-            DataColumn(label: Text('Traditional Tools', style: TextStyle(fontWeight: FontWeight.w600))),
+            DataColumn(
+              label: Text(
+                'Feature',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
+            DataColumn(
+              label: Text(
+                'Thoth',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
+            DataColumn(
+              label: Text(
+                'Traditional Tools',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
           ],
           rows: const [
-            DataRow(cells: [
-              DataCell(Text('Multi-Platform Access')),
-              DataCell(Text('✓ Web, Mobile, Desktop, Voice, SMS')),
-              DataCell(Text('Limited platforms')),
-            ],),
-            DataRow(cells: [
-              DataCell(Text('Sensor Integration')),
-              DataCell(Text('✓ Built-in comprehensive kit')),
-              DataCell(Text('Separate purchases required')),
-            ],),
-            DataRow(cells: [
-              DataCell(Text('Note-taking Integration')),
-              DataCell(Text('✓ Obsidian sync')),
-              DataCell(Text('Manual organization')),
-            ],),
-            DataRow(cells: [
-              DataCell(Text('Collaboration')),
-              DataCell(Text('✓ Federated + Privacy')),
-              DataCell(Text('N/A in most tools')),
-            ],),
-            DataRow(cells: [
-              DataCell(Text('Education Ready')),
-              DataCell(Text('✓ Pre-built curriculum')),
-              DataCell(Text('DIY setup required')),
-            ],),
+            DataRow(
+              cells: [
+                DataCell(Text('Multi-Platform Access')),
+                DataCell(Text('✓ Web, Mobile, Desktop, Voice, SMS')),
+                DataCell(Text('Limited platforms')),
+              ],
+            ),
+            DataRow(
+              cells: [
+                DataCell(Text('Sensor Integration')),
+                DataCell(Text('✓ Built-in comprehensive kit')),
+                DataCell(Text('Separate purchases required')),
+              ],
+            ),
+            DataRow(
+              cells: [
+                DataCell(Text('Note-taking Integration')),
+                DataCell(Text('✓ Obsidian sync')),
+                DataCell(Text('Manual organization')),
+              ],
+            ),
+            DataRow(
+              cells: [
+                DataCell(Text('Collaboration')),
+                DataCell(Text('✓ Federated + Privacy')),
+                DataCell(Text('N/A in most tools')),
+              ],
+            ),
+            DataRow(
+              cells: [
+                DataCell(Text('Education Ready')),
+                DataCell(Text('✓ Pre-built curriculum')),
+                DataCell(Text('DIY setup required')),
+              ],
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildDemoCard(String title, String description, String videoPath) {
+  Widget _buildDemoCard(String title, String description) {
     return GlassCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -673,12 +842,9 @@ class _FeaturesScreenState extends State<FeaturesScreen> with SingleTickerProvid
               color: AppColors.backgroundSecondaryLight,
               borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
             ),
-            child: const Stack(
-              alignment: Alignment.center,
-              children: [
-                Icon(Icons.play_circle_outline, size: 64, color: AppColors.primaryBlue),
-                // TODO: Replace with actual video player widget
-              ],
+            child: const Center(
+              child:
+                  Icon(Icons.sensors, size: 64, color: AppColors.primaryBlue),
             ),
           ),
           Padding(
@@ -686,9 +852,17 @@ class _FeaturesScreenState extends State<FeaturesScreen> with SingleTickerProvid
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: AppTextStyles.h4.copyWith(color: AppColors.textPrimaryLight)),
+                Text(
+                  title,
+                  style: AppTextStyles.h4
+                      .copyWith(color: AppColors.textPrimaryLight),
+                ),
                 const SizedBox(height: 8),
-                Text(description, style: AppTextStyles.bodySmall.copyWith(color: AppColors.textSecondaryLight)),
+                Text(
+                  description,
+                  style: AppTextStyles.bodySmall
+                      .copyWith(color: AppColors.textSecondaryLight),
+                ),
               ],
             ),
           ),

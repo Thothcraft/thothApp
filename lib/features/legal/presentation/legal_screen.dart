@@ -1,8 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
-/// Legal Screen - Privacy Policy and Terms of Service
+/// Legal Screen - Privacy Policy and Terms of Service.
+/// The hosted documents are the authoritative copies.
 class LegalScreen extends StatelessWidget {
   const LegalScreen({super.key});
+
+  static const _privacyUrl = 'https://thothcraft.com/privacy';
+  static const _termsUrl = 'https://thothcraft.com/terms';
+
+  Future<void> _open(String url) async {
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -17,8 +29,10 @@ class LegalScreen extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           const Text(
-            'Your privacy is important to us. This policy outlines how we collect, '
-            'use, and protect your data when using Thothcraft devices and services.',
+            'Raw sensor data stays on your devices and nodes. BLE/Wi-Fi '
+            'scans, IMU, GPS and audio evidence only leave the phone for '
+            'your own Brain account when you enable them in Settings → '
+            'Sources — every producer has an explicit toggle.',
             style: TextStyle(fontSize: 16),
           ),
           const SizedBox(height: 32),
@@ -28,22 +42,20 @@ class LegalScreen extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           const Text(
-            'By using Thothcraft products and services, you agree to these terms. '
-            'Please read them carefully.',
+            'By using Thothcraft products and services you agree to run '
+            'estimators and automations at your own responsibility — they '
+            'can actuate real hardware (lights, locks, speakers) on your '
+            'behalf.',
             style: TextStyle(fontSize: 16),
           ),
           const SizedBox(height: 32),
           ElevatedButton(
-            onPressed: () {
-              // TODO: Open full privacy policy
-            },
+            onPressed: () => _open(_privacyUrl),
             child: const Text('Read Full Privacy Policy'),
           ),
           const SizedBox(height: 16),
           OutlinedButton(
-            onPressed: () {
-              // TODO: Open full terms
-            },
+            onPressed: () => _open(_termsUrl),
             child: const Text('Read Full Terms of Service'),
           ),
         ],

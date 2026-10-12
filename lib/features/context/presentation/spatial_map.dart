@@ -2,7 +2,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../../../core/api/node_client.dart';
 import '../../devices/application/devices_provider.dart';
-import '../../devices/presentation/room_settings_screen.dart';
+import '../../devices/presentation/layout_editor_screen.dart';
+import '../../watch/data/trace_service.dart';
 import '../application/context_providers.dart';
 
 /// Configured 3D geometry and live radio ranging share one coordinate
@@ -11,11 +12,12 @@ import '../application/context_providers.dart';
 /// with an uncertainty ring — a single sighting yields a range circle on
 /// its anchor, never a fake dot. Unlocated endpoints inherit nothing.
 class SpatialMapView extends StatefulWidget {
-  const SpatialMapView(
-      {super.key,
-      required this.devices,
-      required this.edges,
-      this.watchNames = const {},});
+  const SpatialMapView({
+    super.key,
+    required this.devices,
+    required this.edges,
+    this.watchNames = const {},
+  });
   final List<ThothDevice> devices;
   final List<BleRelation> edges;
 
@@ -31,6 +33,7 @@ class _SpatialMapViewState extends State<SpatialMapView> {
   bool _loading = false;
   bool _top = false;
   bool _showUnknowns = true;
+  bool _showTrace = true;
   String? _building;
 
   /// EMA of solved positions — RSSI bursts jump, locations glide.
@@ -39,7 +42,18 @@ class _SpatialMapViewState extends State<SpatialMapView> {
   @override
   void initState() {
     super.initState();
+    TraceService.instance.addListener(_onTrace);
     _load();
+  }
+
+  void _onTrace() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    TraceService.instance.removeListener(_onTrace);
+    super.dispose();
   }
 
   @override
@@ -54,19 +68,21 @@ class _SpatialMapViewState extends State<SpatialMapView> {
   Future<void> _load() async {
     setState(() => _loading = true);
     final docs = <String, Map<String, dynamic>>{}, failed = <String>[];
-    await Future.wait(widget.devices.map((device) async {
-      try {
-        final cached = await NodeClient.instance.room(device.uuid);
-        final room = cached['room'];
-        if (room is Map) {
-          docs[device.uuid] = Map<String, dynamic>.from(room);
-        } else {
+    await Future.wait(
+      widget.devices.map((device) async {
+        try {
+          final cached = await NodeClient.instance.room(device.uuid);
+          final room = cached['room'];
+          if (room is Map) {
+            docs[device.uuid] = Map<String, dynamic>.from(room);
+          } else {
+            failed.add(device.name);
+          }
+        } catch (_) {
           failed.add(device.name);
         }
-      } catch (_) {
-        failed.add(device.name);
-      }
-    }),);
+      }),
+    );
     if (mounted) {
       setState(() {
         _docs = docs;
@@ -77,9 +93,58 @@ class _SpatialMapViewState extends State<SpatialMapView> {
   }
 
   Future<void> _configure(ThothDevice d) async {
-    await Navigator.of(context).push(MaterialPageRoute<void>(
-        builder: (_) => RoomSettingsScreen(deviceId: d.uuid),),);
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => LayoutEditorScreen(
+          deviceId: d.uuid,
+          fleet:
+              widget.devices.map((e) => (uuid: e.uuid, name: e.name)).toList(),
+        ),
+      ),
+    );
     if (mounted) await _load();
+  }
+
+  /// lat/lon → ENU metres around a building anchor (equirectangular —
+  /// accurate to millimetres at building scale).
+  static List<double> geoToEnu(
+    double lat,
+    double lon,
+    double? alt,
+    double lat0,
+    double lon0,
+    double alt0,
+  ) {
+    const r = 6378137.0;
+    final latR = lat0 * math.pi / 180;
+    return [
+      (lon - lon0) * math.pi / 180 * r * math.cos(latR),
+      (lat - lat0) * math.pi / 180 * r,
+      (alt ?? alt0) - alt0,
+    ];
+  }
+
+  /// Trace breadcrumb projected into the selected building's ENU
+  /// frame — only when its doc carries a geo anchor.
+  List<({List<double> enu, int? rssi})> _traceEnu(String? building) {
+    if (building == null || !_showTrace) return const [];
+    for (final doc in _docs.values) {
+      final b = doc['building'] as Map?;
+      if ('${b?['id'] ?? ''}' != building) continue;
+      final a = b?['anchor'] as Map?;
+      final lat0 = (a?['latitude'] as num?)?.toDouble();
+      final lon0 = (a?['longitude'] as num?)?.toDouble();
+      if (lat0 == null || lon0 == null) return const [];
+      final alt0 = (a?['altitude_m'] as num?)?.toDouble() ?? 0.0;
+      return [
+        for (final p in TraceService.instance.trace)
+          (
+            enu: geoToEnu(p.lat, p.lon, null, lat0, lon0, alt0),
+            rssi: p.rssi,
+          ),
+      ];
+    }
+    return const [];
   }
 
   String _labelFor(String id) {
@@ -99,7 +164,11 @@ class _SpatialMapViewState extends State<SpatialMapView> {
   @override
   Widget build(BuildContext context) {
     final scene = SpatialScene.fromDocuments(
-        _docs, widget.edges, widget.devices, widget.watchNames,);
+      _docs,
+      widget.edges,
+      widget.devices,
+      widget.watchNames,
+    );
     // Glide solved positions — 35% per rebuild.
     for (final p in scene.points) {
       if (!p.estimated) continue;
@@ -127,101 +196,147 @@ class _SpatialMapViewState extends State<SpatialMapView> {
     }.difference(located).length;
     final estimates =
         scene.points.where((p) => p.estimated && p.building == selected);
-    return Column(children: [
-      Wrap(
+    return Column(
+      children: [
+        Wrap(
           spacing: 8,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             if (buildings.length > 1)
               DropdownButton<String>(
-                  value: selected,
-                  items: buildings
-                      .map((b) => DropdownMenuItem(value: b, child: Text(b)))
-                      .toList(),
-                  onChanged: (b) => setState(() => _building = b),),
-            TextButton.icon(
-                onPressed: () => setState(() => _top = !_top),
-                icon: Icon(_top ? Icons.view_in_ar : Icons.map_outlined),
-                label: Text(_top ? '3D view' : 'Top view'),),
-            TextButton.icon(
-                onPressed: () => setState(() => _showUnknowns = !_showUnknowns),
-                icon: Icon(_showUnknowns
-                    ? Icons.visibility
-                    : Icons.visibility_off_outlined,),
-                label: Text(_showUnknowns ? 'hide unknowns' : 'show unknowns'),),
-            IconButton(
-                onPressed: _loading ? null : _load,
-                icon: const Icon(Icons.refresh),
-                tooltip: 'Refresh room layouts',),
-            PopupMenuButton<ThothDevice>(
-                tooltip: 'Configure house and rooms',
-                icon: const Icon(Icons.home_work_outlined),
-                itemBuilder: (_) => widget.devices
-                    .map((d) => PopupMenuItem(
-                        value: d, child: Text('Configure ${d.name}'),),)
+                value: selected,
+                items: buildings
+                    .map((b) => DropdownMenuItem(value: b, child: Text(b)))
                     .toList(),
-                onSelected: _configure,),
-          ],),
-      if (_loading) const LinearProgressIndicator(),
-      if (_unavailable.isNotEmpty)
-        Text('Layout unavailable: ${_unavailable.join(', ')}',
-            style: const TextStyle(fontSize: 11),),
-      if (scene.conflicts.isNotEmpty)
-        Text('Conflicting placements: ${scene.conflicts.join(', ')}',
-            style: TextStyle(color: Theme.of(context).colorScheme.error),),
-      Expanded(
+                onChanged: (b) => setState(() => _building = b),
+              ),
+            TextButton.icon(
+              onPressed: () => setState(() => _top = !_top),
+              icon: Icon(_top ? Icons.view_in_ar : Icons.map_outlined),
+              label: Text(_top ? '3D view' : 'Top view'),
+            ),
+            TextButton.icon(
+              onPressed: () => setState(() => _showUnknowns = !_showUnknowns),
+              icon: Icon(
+                _showUnknowns
+                    ? Icons.visibility
+                    : Icons.visibility_off_outlined,
+              ),
+              label: Text(_showUnknowns ? 'hide unknowns' : 'show unknowns'),
+            ),
+            IconButton(
+              onPressed: _loading ? null : _load,
+              icon: const Icon(Icons.refresh),
+              tooltip: 'Refresh room layouts',
+            ),
+            IconButton(
+              onPressed: () => setState(() => _showTrace = !_showTrace),
+              icon: Icon(
+                _showTrace ? Icons.route : Icons.route_outlined,
+              ),
+              tooltip: 'Toggle GPS trace overlay',
+            ),
+            PopupMenuButton<ThothDevice>(
+              tooltip: 'Edit layout visually',
+              icon: const Icon(Icons.home_work_outlined),
+              itemBuilder: (_) => widget.devices
+                  .map(
+                    (d) => PopupMenuItem(
+                      value: d,
+                      child: Text('Configure ${d.name}'),
+                    ),
+                  )
+                  .toList(),
+              onSelected: _configure,
+            ),
+          ],
+        ),
+        if (_loading) const LinearProgressIndicator(),
+        if (_unavailable.isNotEmpty)
+          Text(
+            'Layout unavailable: ${_unavailable.join(', ')}',
+            style: const TextStyle(fontSize: 11),
+          ),
+        if (scene.conflicts.isNotEmpty)
+          Text(
+            'Conflicting placements: ${scene.conflicts.join(', ')}',
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
+        Expanded(
           child: rooms.isEmpty
               ? const Center(
                   child: Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    padding: EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
                         Icon(Icons.home_work_outlined, size: 40),
                         SizedBox(height: 12),
-                        Text('Set up your house and room anchors',
-                            style: TextStyle(
-                                fontSize: 18, fontWeight: FontWeight.w600,),),
+                        Text(
+                          'Set up your house and room anchors',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                         SizedBox(height: 8),
                         Text(
-                            'Choose a device above to enter the house location, measured room layout, floor, direction and device position. Anchored devices become the reference points that located radios are solved against.',
-                            textAlign: TextAlign.center,),
-                      ],),),)
+                          'Choose a device above to enter the house location, measured room layout, floor, direction and device position. Anchored devices become the reference points that located radios are solved against.',
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  ),
+                )
               : InteractiveViewer(
                   minScale: 0.4,
                   maxScale: 10,
                   boundaryMargin: const EdgeInsets.all(400),
                   child: LayoutBuilder(
-                      builder: (_, constraints) => CustomPaint(
-                            size: Size(
-                                constraints.maxWidth, constraints.maxHeight,),
-                            painter: _SpatialPainter(
-                                rooms,
-                                points,
-                                scene.rings
-                                    .where((r) => r.building == selected)
-                                    .toList(),
-                                widget.edges,
-                                _top,
-                                _labelFor,),
-                          ),),),),
-      Text(
+                    builder: (_, constraints) => CustomPaint(
+                      size: Size(
+                        constraints.maxWidth,
+                        constraints.maxHeight,
+                      ),
+                      painter: _SpatialPainter(
+                        rooms,
+                        points,
+                        scene.rings
+                            .where((r) => r.building == selected)
+                            .toList(),
+                        widget.edges,
+                        _top,
+                        _labelFor,
+                        trace: _traceEnu(selected),
+                      ),
+                    ),
+                  ),
+                ),
+        ),
+        Text(
           '${scene.points.where((p) => p.building == selected && !p.estimated).length} anchored · '
           '${estimates.length} located by radio · '
           '${scene.rings.where((r) => r.building == selected).length} ranged only · '
           '$unlocated unlocated',
-          style: const TextStyle(fontSize: 12),),
-      for (final p in points.take(6))
-        Text(
+          style: const TextStyle(fontSize: 12),
+        ),
+        for (final p in points.take(6))
+          Text(
             '${_labelFor(p.id)} · floor ${p.floor ?? '?'} · '
             'h ${p.enu[2].toStringAsFixed(1)} m · ${p.membership}'
             '${p.estimated ? ' · est ±${p.uncertaintyM.toStringAsFixed(1)} m' : ''}',
-            style: const TextStyle(fontSize: 11),),
-      const Padding(
+            style: const TextStyle(fontSize: 11),
+          ),
+        const Padding(
           padding: EdgeInsets.all(8),
           child: Text(
-              'Anchored devices are measured positions. Radios seen by two or more anchors are trilaterated from BLE + Wi-Fi RSSI (dashed ring = solver uncertainty); a single sighting draws a range circle only.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 11),),),
-    ],);
+            'Anchored devices are measured positions. Radios seen by two or more anchors are trilaterated from BLE + Wi-Fi RSSI (dashed ring = solver uncertainty); a single sighting draws a range circle only.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 11),
+          ),
+        ),
+      ],
+    );
   }
 }
 
@@ -239,8 +354,17 @@ List<double> roomToEnu(List<double> p, List<double> origin, double heading) {
 }
 
 class SpatialRoom {
-  SpatialRoom(this.building, this.id, this.name, this.corners, this.floor,
-      this.origin, this.headingDeg, this.hw, this.hd,);
+  SpatialRoom(
+    this.building,
+    this.id,
+    this.name,
+    this.corners,
+    this.floor,
+    this.origin,
+    this.headingDeg,
+    this.hw,
+    this.hd,
+  );
   final String building, id, name;
   final List<List<double>> corners;
   final int? floor;
@@ -266,7 +390,12 @@ class SpatialRoom {
 /// One ranged-but-unsolved radio: single sighting → circle on its anchor.
 class RangeRing {
   RangeRing(
-      this.target, this.building, this.anchorEnu, this.radiusM, this.modality,);
+    this.target,
+    this.building,
+    this.anchorEnu,
+    this.radiusM,
+    this.modality,
+  );
   final String target, building, modality;
   final List<double> anchorEnu;
   final double radiusM;
@@ -281,14 +410,20 @@ class FovWedge {
 }
 
 class SpatialPoint {
-  SpatialPoint(this.id, this.building, this.enu, this.floor, this.membership,
-      {this.kind = 'thoth',
-      this.estimated = false,
-      this.uncertaintyM = 0,
-      this.anchorCount = 0,
-      this.known = true,
-      this.moving = false,
-      this.wedges = const [],});
+  SpatialPoint(
+    this.id,
+    this.building,
+    this.enu,
+    this.floor,
+    this.membership, {
+    this.kind = 'thoth',
+    this.estimated = false,
+    this.uncertaintyM = 0,
+    this.anchorCount = 0,
+    this.known = true,
+    this.moving = false,
+    this.wedges = const [],
+  });
   final String id, building, membership, kind;
   List<double> enu;
   final int? floor;
@@ -311,10 +446,11 @@ class SpatialScene {
   List<SpatialPoint> get knownPoints => points.where((p) => p.known).toList();
 
   SpatialScene.fromDocuments(
-      Map<String, Map<String, dynamic>> docs,
-      List<BleRelation> edges,
-      List<ThothDevice> devices,
-      Map<String, String> watchNames,) {
+    Map<String, Map<String, dynamic>> docs,
+    List<BleRelation> edges,
+    List<ThothDevice> devices,
+    Map<String, String> watchNames,
+  ) {
     final uniqueRooms = <String, SpatialRoom>{},
         uniquePoints = <String, SpatialPoint>{};
     final fleetKind = {for (final d in devices) d.uuid: _kindOf(d)};
@@ -356,15 +492,16 @@ class SpatialScene {
               roomToEnu(p, origin, heading),
         ];
         final room = SpatialRoom(
-            building,
-            id,
-            '${r['name'] ?? id}',
-            corners,
-            s['floor'] is int ? s['floor'] as int : null,
-            origin,
-            heading,
-            w / 2,
-            d / 2,);
+          building,
+          id,
+          '${r['name'] ?? id}',
+          corners,
+          s['floor'] is int ? s['floor'] as int : null,
+          origin,
+          heading,
+          w / 2,
+          d / 2,
+        );
         uniqueRooms['$building/$id'] = room;
         for (final dev in (doc['devices'] as List? ?? []).whereType<Map>()) {
           final roomId =
@@ -406,16 +543,25 @@ class SpatialScene {
               0.0,
               -math.cos(yaw * math.pi / 180),
             ];
-            wedges.add(FovWedge(
+            wedges.add(
+              FovWedge(
                 sc,
                 roomToEnu(dirRoom, const [0, 0, 0], heading),
                 fov,
                 range,
-                '${sen['type'] ?? 'sensor'}',),);
+                '${sen['type'] ?? 'sensor'}',
+              ),
+            );
           }
-          final point = SpatialPoint(did, building, enu,
-              s['floor'] is int ? s['floor'] as int : null, membership,
-              kind: fleetKind[did] ?? 'thoth', wedges: wedges,);
+          final point = SpatialPoint(
+            did,
+            building,
+            enu,
+            s['floor'] is int ? s['floor'] as int : null,
+            membership,
+            kind: fleetKind[did] ?? 'thoth',
+            wedges: wedges,
+          );
           final old = uniquePoints[did];
           if (old != null &&
               (old.building != building ||
@@ -450,8 +596,11 @@ class SpatialScene {
 
   /// Trilaterate every sighted target against the anchored fleet.
   /// Solve per-building; the building contributing the most sightings wins.
-  void _solveRadio(List<BleRelation> edges, List<ThothDevice> devices,
-      Map<String, String> watchNames,) {
+  void _solveRadio(
+    List<BleRelation> edges,
+    List<ThothDevice> devices,
+    Map<String, String> watchNames,
+  ) {
     final anchors = {
       for (final p in points.where((p) => !p.estimated)) p.id: p,
     };
@@ -467,7 +616,14 @@ class SpatialScene {
       if (a == null || e.target.isEmpty) continue;
       // Anchor can't range itself; skip degenerate self-edges.
       if (a.id == e.target) continue;
-      final dist = _rssiToM(e.modality, e.rssiDbm);
+      // Median of the sighting window beats the single freshest sample —
+      // RSSI is noisy ±5 dB; the window already rides the relation.
+      var rssi = e.rssiDbm;
+      if (e.rssiWindow.length >= 3) {
+        final w = [...e.rssiWindow]..sort();
+        rssi = w[w.length ~/ 2];
+      }
+      final dist = _rssiToM(e.modality, rssi);
       sightings.putIfAbsent(e.target, () => []).add((a, dist, e.modality));
     }
     for (final entry in sightings.entries) {
@@ -585,26 +741,44 @@ class SpatialScene {
           break;
         }
       }
-      points.add(SpatialPoint(target, building, enu, floor, membership,
+      points.add(
+        SpatialPoint(
+          target,
+          building,
+          enu,
+          floor,
+          membership,
           kind: kind,
           estimated: true,
           uncertaintyM: unc,
           anchorCount: sights.length,
           known: known,
-          moving: movingTargets.contains(target),),);
+          moving: movingTargets.contains(target),
+        ),
+      );
     }
   }
 }
 
 class _SpatialPainter extends CustomPainter {
   _SpatialPainter(
-      this.rooms, this.points, this.rings, this.edges, this.top, this.labelFor,);
+    this.rooms,
+    this.points,
+    this.rings,
+    this.edges,
+    this.top,
+    this.labelFor, {
+    this.trace = const [],
+  });
   final List<SpatialRoom> rooms;
   final List<SpatialPoint> points;
   final List<RangeRing> rings;
   final List<BleRelation> edges;
   final bool top;
   final String Function(String) labelFor;
+
+  /// GPS breadcrumb in ENU (+ watch-link RSSI per fix for colouring).
+  final List<({List<double> enu, int? rssi})> trace;
 
   late Offset Function(List<double>) _p;
   late double _scale;
@@ -675,9 +849,67 @@ class _SpatialPainter extends CustomPainter {
     final bw = math.max(2.0, (b.dx - a.dx).abs()),
         bh = math.max(2.0, (b.dy - a.dy).abs());
     _scale = math.min(size.width / (bw + 8), size.height / (bh + 8));
-    final center = Offset(size.width / 2 - (a.dx + b.dx) * _scale / 2,
-        size.height / 2 - (a.dy + b.dy) * _scale / 2,);
+    final center = Offset(
+      size.width / 2 - (a.dx + b.dx) * _scale / 2,
+      size.height / 2 - (a.dy + b.dy) * _scale / 2,
+    );
     _p = (p) => center + project(p) * _scale;
+
+    // GPS trace — breadcrumb through the building frame, coloured by
+    // watch-link strength at each fix.
+    if (trace.length > 1) {
+      const rssiColors = <Color>[
+        Colors.green,
+        Colors.orange,
+        Colors.red,
+        Colors.blueGrey,
+      ];
+      final path = Path()
+        ..moveTo(_p(trace.first.enu).dx, _p(trace.first.enu).dy);
+      for (var i = 1; i < trace.length; i++) {
+        path.lineTo(_p(trace[i].enu).dx, _p(trace[i].enu).dy);
+      }
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = Colors.deepOrange.withValues(alpha: 0.75)
+          ..strokeWidth = 2.4
+          ..style = PaintingStyle.stroke
+          ..strokeJoin = StrokeJoin.round,
+      );
+      for (final tp in trace) {
+        final c = tp.rssi == null
+            ? 3
+            : tp.rssi! >= -55
+                ? 0
+                : tp.rssi! >= -70
+                    ? 1
+                    : 2;
+        canvas.drawCircle(_p(tp.enu), 2.2, Paint()..color = rssiColors[c]);
+      }
+      final head = _p(trace.last.enu);
+      canvas.drawCircle(
+        head,
+        6.5,
+        Paint()..color = Colors.deepOrange.withValues(alpha: 0.9),
+      );
+      canvas.drawCircle(
+        head,
+        6.5,
+        Paint()
+          ..color = Colors.white
+          ..strokeWidth = 1.6
+          ..style = PaintingStyle.stroke,
+      );
+      _text(
+        canvas,
+        'trace',
+        head + const Offset(9, -10),
+        10,
+        bold: true,
+        color: Colors.deepOrange,
+      );
+    }
 
     final groundZ = lo[2];
     // Meter grid on the lowest floor plane.
@@ -699,7 +931,9 @@ class _SpatialPainter extends CustomPainter {
       }
       floor.close();
       canvas.drawPath(
-          floor, Paint()..color = Colors.blueGrey.withValues(alpha: 0.12),);
+        floor,
+        Paint()..color = Colors.blueGrey.withValues(alpha: 0.12),
+      );
       final wall = Paint()
         ..color = Colors.blueGrey.shade700
         ..strokeWidth = 2;
@@ -711,9 +945,13 @@ class _SpatialPainter extends CustomPainter {
       for (var i = 0; i < 4; i++) {
         canvas.drawLine(_p(r.corners[i]), _p(r.corners[i + 4]), wall);
       }
-      _text(canvas, '${r.name}${r.floor != null ? ' · F${r.floor}' : ''}',
-          _p(r.corners[0]) + const Offset(4, -20), 13,
-          bold: true,);
+      _text(
+        canvas,
+        '${r.name}${r.floor != null ? ' · F${r.floor}' : ''}',
+        _p(r.corners[0]) + const Offset(4, -20),
+        13,
+        bold: true,
+      );
     }
 
     // Sensor field-of-view wedges (behind links + nodes).
@@ -727,25 +965,27 @@ class _SpatialPainter extends CustomPainter {
         for (var i = 0; i <= steps; i++) {
           final ang = base - half + 2 * half * i / steps;
           fan.lineTo(
-              _p([
-                w.centerEnu[0] + math.cos(ang) * w.rangeM,
-                w.centerEnu[1] + math.sin(ang) * w.rangeM,
-                w.centerEnu[2],
-              ]).dx,
-              _p([
-                w.centerEnu[0] + math.cos(ang) * w.rangeM,
-                w.centerEnu[1] + math.sin(ang) * w.rangeM,
-                w.centerEnu[2],
-              ]).dy,);
+            _p([
+              w.centerEnu[0] + math.cos(ang) * w.rangeM,
+              w.centerEnu[1] + math.sin(ang) * w.rangeM,
+              w.centerEnu[2],
+            ]).dx,
+            _p([
+              w.centerEnu[0] + math.cos(ang) * w.rangeM,
+              w.centerEnu[1] + math.sin(ang) * w.rangeM,
+              w.centerEnu[2],
+            ]).dy,
+          );
         }
         fan.close();
         canvas.drawPath(fan, Paint()..color = color.withValues(alpha: 0.10));
         canvas.drawPath(
-            fan,
-            Paint()
-              ..color = color.withValues(alpha: 0.35)
-              ..strokeWidth = 1
-              ..style = PaintingStyle.stroke,);
+          fan,
+          Paint()
+            ..color = color.withValues(alpha: 0.35)
+            ..strokeWidth = 1
+            ..style = PaintingStyle.stroke,
+        );
       }
     }
 
@@ -759,33 +999,41 @@ class _SpatialPainter extends CustomPainter {
       final color = _modalityColors[e.modality] ?? Colors.teal;
       final pa = _p(a.enu), pb = _p(b.enu);
       canvas.drawLine(
-          pa,
-          pb,
-          Paint()
-            ..color = color.withValues(alpha: 0.15 + 0.5 * fresh)
-            ..strokeWidth = 0.8 + 2.6 * strength
-            ..strokeCap = StrokeCap.round,);
+        pa,
+        pb,
+        Paint()
+          ..color = color.withValues(alpha: 0.15 + 0.5 * fresh)
+          ..strokeWidth = 0.8 + 2.6 * strength
+          ..strokeCap = StrokeCap.round,
+      );
       final mid = Offset((pa.dx + pb.dx) / 2, (pa.dy + pb.dy) / 2);
       if ((pa - pb).distance > 70) {
-        _text(canvas, '${e.rssiDbm.round()} dBm', mid, 9,
-            color: color.withValues(alpha: 0.75),);
+        _text(
+          canvas,
+          '${e.rssiDbm.round()} dBm',
+          mid,
+          9,
+          color: color.withValues(alpha: 0.75),
+        );
       }
     }
 
     // Range rings — single-sighting radios circle their anchor.
     for (final r in rings) {
       _dashedCircle(
-          canvas,
-          _p([r.anchorEnu[0], r.anchorEnu[1], r.anchorEnu[2]]),
-          r.radiusM,
-          Colors.blueGrey.withValues(alpha: 0.55),);
+        canvas,
+        _p([r.anchorEnu[0], r.anchorEnu[1], r.anchorEnu[2]]),
+        r.radiusM,
+        Colors.blueGrey.withValues(alpha: 0.55),
+      );
       _text(
-          canvas,
-          '~${r.radiusM.toStringAsFixed(1)} m',
-          _p([r.anchorEnu[0], r.anchorEnu[1] + r.radiusM, r.anchorEnu[2]]) +
-              const Offset(6, 0),
-          10,
-          color: Colors.blueGrey,);
+        canvas,
+        '~${r.radiusM.toStringAsFixed(1)} m',
+        _p([r.anchorEnu[0], r.anchorEnu[1] + r.radiusM, r.anchorEnu[2]]) +
+            const Offset(6, 0),
+        10,
+        color: Colors.blueGrey,
+      );
     }
 
     // Nodes — anchors as squares, estimates as circles + uncertainty.
@@ -795,31 +1043,41 @@ class _SpatialPainter extends CustomPainter {
           p.known ? (_kindColors[p.kind] ?? Colors.blueGrey) : Colors.grey;
       if (p.estimated) {
         _dashedCircle(canvas, c, p.uncertaintyM, color.withValues(alpha: 0.5));
-        canvas.drawCircle(c, p.uncertaintyM * _scale,
-            Paint()..color = color.withValues(alpha: 0.05),);
+        canvas.drawCircle(
+          c,
+          p.uncertaintyM * _scale,
+          Paint()..color = color.withValues(alpha: 0.05),
+        );
       }
       if (p.estimated) {
         canvas.drawCircle(c, 9, Paint()..color = color.withValues(alpha: 0.85));
         canvas.drawCircle(
-            c,
-            9,
-            Paint()
-              ..color = Colors.white
-              ..strokeWidth = 1.6
-              ..style = PaintingStyle.stroke,);
+          c,
+          9,
+          Paint()
+            ..color = Colors.white
+            ..strokeWidth = 1.6
+            ..style = PaintingStyle.stroke,
+        );
       } else {
         final rect = Rect.fromCenter(center: c, width: 18, height: 18);
         canvas.drawRect(rect, Paint()..color = color);
         canvas.drawRect(
-            rect,
-            Paint()
-              ..color = Colors.white
-              ..strokeWidth = 1.6
-              ..style = PaintingStyle.stroke,);
+          rect,
+          Paint()
+            ..color = Colors.white
+            ..strokeWidth = 1.6
+            ..style = PaintingStyle.stroke,
+        );
       }
-      _text(canvas, '${_kindGlyph[p.kind] ?? '•'} ${_label(p.id)}',
-          c + const Offset(12, -14), 12,
-          bold: true, color: p.known ? Colors.black87 : Colors.grey,);
+      _text(
+        canvas,
+        '${_kindGlyph[p.kind] ?? '•'} ${_label(p.id)}',
+        c + const Offset(12, -14),
+        12,
+        bold: true,
+        color: p.known ? Colors.black87 : Colors.grey,
+      );
       final sub = p.estimated
           ? '±${p.uncertaintyM.toStringAsFixed(1)}m · ${p.anchorCount} anchors'
               '${p.moving ? ' · varying' : ''}'
@@ -852,56 +1110,80 @@ class _SpatialPainter extends CustomPainter {
     final rect = Rect.fromCircle(center: c, radius: rpx);
     for (var s = 0; s < segs; s += 2) {
       canvas.drawArc(
-          rect, s * 2 * math.pi / segs, math.pi / segs, false, paint,);
+        rect,
+        s * 2 * math.pi / segs,
+        math.pi / segs,
+        false,
+        paint,
+      );
     }
   }
 
   void _legend(Canvas canvas, Size size) {
     var y = size.height - 66;
     const x = 12.0;
-    _text(canvas, '▣ anchored node   ◉ person device   ○ radio located',
-        Offset(x, y), 10,
-        color: Colors.black54,);
+    _text(
+      canvas,
+      '▣ anchored node   ◉ person device   ○ radio located',
+      Offset(x, y),
+      10,
+      color: Colors.black54,
+    );
     y += 14;
     _text(
-        canvas,
-        '— teal BLE · indigo Wi-Fi · purple CSI   -- dashed = estimate',
-        Offset(x, y),
-        10,
-        color: Colors.black54,);
+      canvas,
+      '— teal BLE · indigo Wi-Fi · purple CSI   -- dashed = estimate',
+      Offset(x, y),
+      10,
+      color: Colors.black54,
+    );
     // North arrow + 1 m scale bar (top-right).
     final nTop = Offset(size.width - 42, 26), nBot = nTop + const Offset(0, 22);
     canvas.drawLine(
-        nBot,
-        nTop,
-        Paint()
-          ..color = Colors.black54
-          ..strokeWidth = 1.6,);
+      nBot,
+      nTop,
+      Paint()
+        ..color = Colors.black54
+        ..strokeWidth = 1.6,
+    );
     canvas.drawCircle(nTop, 2.6, Paint()..color = Colors.black54);
     _text(canvas, 'N', nTop + const Offset(-3, -14), 11, bold: true);
     // A horizontal metre projects to ~0.86×scale px in the iso view.
     final meter = _scale * (top ? 1.0 : 0.86);
     canvas.drawLine(
-        Offset(size.width - 18, size.height - 20),
-        Offset(size.width - 18 - meter, size.height - 20),
-        Paint()
-          ..color = Colors.black87
-          ..strokeWidth = 2,);
-    _text(canvas, '1 m',
-        Offset(size.width - 18 - meter / 2 - 8, size.height - 34), 10,);
+      Offset(size.width - 18, size.height - 20),
+      Offset(size.width - 18 - meter, size.height - 20),
+      Paint()
+        ..color = Colors.black87
+        ..strokeWidth = 2,
+    );
+    _text(
+      canvas,
+      '1 m',
+      Offset(size.width - 18 - meter / 2 - 8, size.height - 34),
+      10,
+    );
   }
 
-  void _text(Canvas c, String s, Offset at, double size,
-      {bool bold = false, Color color = Colors.black87,}) {
+  void _text(
+    Canvas c,
+    String s,
+    Offset at,
+    double size, {
+    bool bold = false,
+    Color color = Colors.black87,
+  }) {
     (TextPainter(
-            text: TextSpan(
-                text: s,
-                style: TextStyle(
-                    color: color,
-                    fontSize: size,
-                    fontWeight: bold ? FontWeight.w600 : FontWeight.normal,),),
-            textDirection: TextDirection.ltr,)
-          ..layout())
+      text: TextSpan(
+        text: s,
+        style: TextStyle(
+          color: color,
+          fontSize: size,
+          fontWeight: bold ? FontWeight.w600 : FontWeight.normal,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout())
         .paint(c, at);
   }
 
