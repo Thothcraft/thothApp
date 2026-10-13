@@ -71,6 +71,7 @@ class ChatAnswer {
 class ChatRepository {
   Future<ChatAnswer> send(
     String message, {
+    String chatId = 'main',
     List<ChatTurn> history = const [],
     List<ChatAttachment> attachments = const [],
     bool includeContext = true,
@@ -80,12 +81,37 @@ class ChatRepository {
   }) async {
     final res = await BrainClient.instance.postV1('/chat', body: {
       'message': message,
+      'chat_id': chatId,
       'history': [for (final t in history) t.toJson()],
       'attachments': [for (final a in attachments) a.toJson()],
       'include_context': includeContext,
       'model': model,
     }, timeout: const Duration(minutes: 3),);
     return ChatAnswer.fromJson(res);
+  }
+
+  /// Conversation history is shared with the Brain hub and scoped to the
+  /// authenticated account by the server.
+  Future<List<ChatTurn>> history({String chatId = 'main'}) async {
+    final res = await BrainClient.instance.getV1(
+      '/chat/history?chat_id=${Uri.encodeQueryComponent(chatId)}&limit=12',
+    );
+    final messages = (res['messages'] as List? ?? const [])
+        .whereType<Map>()
+        .map((m) => ChatTurn(
+              role: '${m['role'] ?? ''}',
+              content: '${m['content'] ?? ''}',
+            ))
+        .where((m) => (m.role == 'user' || m.role == 'assistant') &&
+            m.content.isNotEmpty)
+        .toList();
+    return messages;
+  }
+
+  Future<void> clearHistory({String chatId = 'main'}) async {
+    await BrainClient.instance.deleteV1(
+      '/chat/history?chat_id=${Uri.encodeQueryComponent(chatId)}',
+    );
   }
 
   /// GET /v1/chat/context — the bundle the assistant sees.

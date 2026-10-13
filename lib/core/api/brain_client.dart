@@ -14,16 +14,19 @@ class BrainClient {
   static const String _tokenKey = 'brain_access_token';
   static const String _baseUrlKey = 'brain_base_url';
 
-  final Dio _dio = Dio(BaseOptions(
-    connectTimeout: const Duration(seconds: 15),
-    receiveTimeout: const Duration(seconds: 30),
-  ),);
+  final Dio _dio = Dio(
+    BaseOptions(
+      connectTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(seconds: 30),
+    ),
+  );
 
   String? _token;
   String _baseUrl = defaultBaseUrl;
 
   String get baseUrl => _baseUrl;
   bool get hasToken => _token != null && _token!.isNotEmpty;
+
   /// Bearer token for streaming endpoints (SSE headers).
   String? get token => _token;
 
@@ -66,35 +69,51 @@ class BrainClient {
   /// gateway can act with a device-scoped JWT (heartbeat/pairing-status);
   /// [headers] merges extras such as ``X-Pairing-Secret``.
   Options _options({String? bearerToken, Map<String, dynamic>? headers}) =>
-      Options(headers: {
-        'Accept': 'application/json',
-        if (bearerToken != null)
-          'Authorization': 'Bearer $bearerToken'
-        else if (hasToken)
-          'Authorization': 'Bearer $_token',
-        ...?headers,
-      },);
+      Options(
+        headers: {
+          'Accept': 'application/json',
+          if (bearerToken != null)
+            'Authorization': 'Bearer $bearerToken'
+          else if (hasToken)
+            'Authorization': 'Bearer $_token',
+          ...?headers,
+        },
+      );
 
   String _api(String path) => '$_baseUrl/api$path';
   String _v1(String path) => '$_baseUrl/v1$path';
 
-  Future<Map<String, dynamic>> getJson(String path,
-      {Map<String, dynamic>? params,
-      String? bearerToken,
-      Map<String, dynamic>? headers,}) async {
+  Future<Map<String, dynamic>> getJson(
+    String path, {
+    Map<String, dynamic>? params,
+    String? bearerToken,
+    Map<String, dynamic>? headers,
+    Duration? timeout,
+  }) async {
     await init();
-    final res = await _dio.get(_api(path),
-        queryParameters: params,
-        options: _options(bearerToken: bearerToken, headers: headers),);
+    final res = await _dio.get(
+      _api(path),
+      queryParameters: params,
+      options: _options(bearerToken: bearerToken, headers: headers).copyWith(
+        connectTimeout: timeout,
+        sendTimeout: timeout,
+        receiveTimeout: timeout,
+      ),
+    );
     return Map<String, dynamic>.from(res.data as Map);
   }
 
   /// GET a versioned v1 endpoint.
-  Future<Map<String, dynamic>> getV1(String path,
-      {Map<String, dynamic>? params,}) async {
+  Future<Map<String, dynamic>> getV1(
+    String path, {
+    Map<String, dynamic>? params,
+  }) async {
     await init();
-    final res = await _dio.get(_v1(path),
-        queryParameters: params, options: _opts,);
+    final res = await _dio.get(
+      _v1(path),
+      queryParameters: params,
+      options: _opts,
+    );
     return Map<String, dynamic>.from(res.data as Map);
   }
 
@@ -102,23 +121,34 @@ class BrainClient {
   ///
   /// [timeout] overrides BOTH send/receive timeouts — LLM-backed
   /// calls (chat, transcribe) legitimately outlive the 30 s default.
-  Future<Map<String, dynamic>> postV1(String path,
-      {Map<String, dynamic>? body, Duration? timeout,}) async {
+  Future<Map<String, dynamic>> postV1(
+    String path, {
+    Map<String, dynamic>? body,
+    Duration? timeout,
+  }) async {
     await init();
     final opts = timeout == null
         ? _opts
         : _opts.copyWith(receiveTimeout: timeout, sendTimeout: timeout);
-    final res = await _dio.post(_v1(path),
-        data: body ?? {}, options: opts,);
+    final res = await _dio.post(
+      _v1(path),
+      data: body ?? {},
+      options: opts,
+    );
     return Map<String, dynamic>.from(res.data as Map);
   }
 
   /// PUT a legacy ``/api`` endpoint.
-  Future<Map<String, dynamic>> putJson(String path,
-      {Map<String, dynamic>? body,}) async {
+  Future<Map<String, dynamic>> putJson(
+    String path, {
+    Map<String, dynamic>? body,
+  }) async {
     await init();
-    final res = await _dio.put(_api(path),
-        data: body ?? {}, options: _opts,);
+    final res = await _dio.put(
+      _api(path),
+      data: body ?? {},
+      options: _opts,
+    );
     return Map<String, dynamic>.from(res.data as Map);
   }
 
@@ -132,38 +162,47 @@ class BrainClient {
   }
 
   /// Recent typed predictions for a device (v1 ``PredictionListV1``).
-  Future<List<Map<String, dynamic>>> getDevicePredictions(String deviceId,
-      {int limit = 50,}) async {
-    final res = await getV1('/devices/$deviceId/predictions',
-        params: {'limit': limit},);
+  Future<List<Map<String, dynamic>>> getDevicePredictions(
+    String deviceId, {
+    int limit = 50,
+  }) async {
+    final res = await getV1(
+      '/devices/$deviceId/predictions',
+      params: {'limit': limit},
+    );
     final list = (res['predictions'] ?? const []) as List;
-    return list
-        .map((e) => Map<String, dynamic>.from(e as Map))
-        .toList();
+    return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 
   /// Cursor-paged real samples for one sensor (v1 ``StreamPageV1``).
   /// Returns ``{samples: [...], cursor: String?, state: String}``.
-  Future<Map<String, dynamic>> streamSensor(String deviceId, String sensorId,
-      {String? cursor,}) async {
-    return getV1('/devices/$deviceId/streams/$sensorId',
-        params: {if (cursor != null) 'cursor': cursor},);
+  Future<Map<String, dynamic>> streamSensor(
+    String deviceId,
+    String sensorId, {
+    String? cursor,
+  }) async {
+    return getV1(
+      '/devices/$deviceId/streams/$sensorId',
+      params: {if (cursor != null) 'cursor': cursor},
+    );
   }
 
   /// List a device's captures (v1 ``CaptureListV1``).
   Future<List<Map<String, dynamic>>> getDeviceCaptures(String deviceId) async {
     final res = await getV1('/devices/$deviceId/captures');
     final list = (res['captures'] ?? const []) as List;
-    return list
-        .map((e) => Map<String, dynamic>.from(e as Map))
-        .toList();
+    return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 
   /// Start a capture; returns the durable CaptureV1 (state ``requested``).
-  Future<Map<String, dynamic>> startCapture(String deviceId,
-      {List<String>? sensors,}) async {
-    return postV1('/devices/$deviceId/captures',
-        body: {'sensors': sensors ?? []},);
+  Future<Map<String, dynamic>> startCapture(
+    String deviceId, {
+    List<String>? sensors,
+  }) async {
+    return postV1(
+      '/devices/$deviceId/captures',
+      body: {'sensors': sensors ?? []},
+    );
   }
 
   /// Stop a capture by its durable id; returns ``{id, device_id, state}``.
@@ -171,13 +210,17 @@ class BrainClient {
     return postV1('/captures/$captureId/stop');
   }
 
-  Future<Map<String, dynamic>> postJson(String path,
-      {Map<String, dynamic>? body,
-      String? bearerToken,
-      Map<String, dynamic>? headers,}) async {
-    final res = await _dio.post(_api(path),
-        data: body ?? {},
-        options: _options(bearerToken: bearerToken, headers: headers),);
+  Future<Map<String, dynamic>> postJson(
+    String path, {
+    Map<String, dynamic>? body,
+    String? bearerToken,
+    Map<String, dynamic>? headers,
+  }) async {
+    final res = await _dio.post(
+      _api(path),
+      data: body ?? {},
+      options: _options(bearerToken: bearerToken, headers: headers),
+    );
     return Map<String, dynamic>.from(res.data as Map);
   }
 
@@ -192,31 +235,43 @@ class BrainClient {
     String deviceType = 'pinetime',
     Map<String, dynamic>? hardwareInfo,
   }) =>
-      postJson('/device/pairing/start', body: {
-        'device_id': deviceId,
-        'device_name': deviceName,
-        'device_type': deviceType,
-        if (hardwareInfo != null) 'hardware_info': hardwareInfo,
-      },);
+      postJson(
+        '/device/pairing/start',
+        body: {
+          'device_id': deviceId,
+          'device_name': deviceName,
+          'device_type': deviceType,
+          if (hardwareInfo != null) 'hardware_info': hardwareInfo,
+        },
+      );
 
   /// GET /api/device/pairing/status — poll until the user claims the code.
   /// Returns ``access_token`` (device JWT) once paired.
-  Future<Map<String, dynamic>> devicePairingStatus(String deviceId,
-          String pairingSecret,) =>
-      getJson('/device/pairing/status',
-          params: {'device_id': deviceId},
-          headers: {'X-Pairing-Secret': pairingSecret},);
+  Future<Map<String, dynamic>> devicePairingStatus(
+    String deviceId,
+    String pairingSecret,
+  ) =>
+      getJson(
+        '/device/pairing/status',
+        params: {'device_id': deviceId},
+        headers: {'X-Pairing-Secret': pairingSecret},
+      );
 
   /// POST /api/device/heartbeat on behalf of the watch (device JWT).
-  Future<Map<String, dynamic>> deviceHeartbeat(String deviceToken,
-          Map<String, dynamic> body,) =>
+  Future<Map<String, dynamic>> deviceHeartbeat(
+    String deviceToken,
+    Map<String, dynamic> body,
+  ) =>
       postJson('/device/heartbeat', body: body, bearerToken: deviceToken);
 
   /// GET /api/device/list — all approved devices on the account.
-  Future<List<Map<String, dynamic>>> listDevices(
-      {bool includeOffline = true,}) async {
-    final res = await getJson('/device/list',
-        params: {'include_offline': includeOffline},);
+  Future<List<Map<String, dynamic>>> listDevices({
+    bool includeOffline = true,
+  }) async {
+    final res = await getJson(
+      '/device/list',
+      params: {'include_offline': includeOffline},
+    );
     final list = (res['devices'] ?? const []) as List;
     return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
@@ -230,27 +285,43 @@ class BrainClient {
   /// are rejected by get_current_user; the watch device belongs to the
   /// app's owner so the user token is both valid and required).
   Future<Map<String, dynamic>> uploadLiveChunk(
-          String deviceUuid, Map<String, dynamic> payload,) =>
+    String deviceUuid,
+    Map<String, dynamic> payload,
+  ) =>
       postJson('/device/$deviceUuid/live-chunks', body: payload);
 
   /// POST /api/device/{uuid}/commands — queue a command the gateway drains
   /// (watch_notify / watch_nav / watch_alert / ble_gatt_write …).
   Future<Map<String, dynamic>> queueDeviceCommand(
-          String deviceUuid, String command,
-          {Map<String, dynamic>? payload,}) =>
-      postJson('/device/$deviceUuid/commands',
-          body: {'command': command, 'payload': payload ?? {}},);
+    String deviceUuid,
+    String command, {
+    Map<String, dynamic>? payload,
+  }) =>
+      postJson(
+        '/device/$deviceUuid/commands',
+        body: {'command': command, 'payload': payload ?? {}},
+      );
 
   /// POST /api/device/{uuid}/commands/{id}/ack — acknowledge an executed
   /// command; accepts either the device JWT or the owner user token.
   Future<Map<String, dynamic>> ackDeviceCommand(
-          String deviceUuid, int commandId, Map<String, dynamic> result,
-          {String? bearerToken,}) =>
-      postJson('/device/$deviceUuid/commands/$commandId/ack',
-          body: result, bearerToken: bearerToken,);
+    String deviceUuid,
+    int commandId,
+    Map<String, dynamic> result, {
+    String? bearerToken,
+  }) =>
+      postJson(
+        '/device/$deviceUuid/commands/$commandId/ack',
+        body: result,
+        bearerToken: bearerToken,
+      );
 
   Future<Map<String, dynamic>> postMultipart(
-      String path, String field, String filename, List<int> bytes,) async {
+    String path,
+    String field,
+    String filename,
+    List<int> bytes,
+  ) async {
     final form = FormData.fromMap({
       field: MultipartFile.fromBytes(bytes, filename: filename),
     });
@@ -263,17 +334,23 @@ class BrainClient {
   }
 
   /// Login with username/password; stores the returned token.
-  Future<Map<String, dynamic>> login(String username, String password,
-      {bool persist = true,}) async {
-    final res = await _dio.post('$_baseUrl/api/token',
-        data: {'username': username, 'password': password},
-        options: Options(headers: {'Accept': 'application/json'}),);
+  Future<Map<String, dynamic>> login(
+    String username,
+    String password, {
+    bool persist = true,
+  }) async {
+    final res = await _dio.post(
+      '$_baseUrl/api/token',
+      data: {'username': username, 'password': password},
+      options: Options(headers: {'Accept': 'application/json'}),
+    );
     final data = Map<String, dynamic>.from(res.data as Map);
     final token = data['access_token'] as String?;
     if (token == null) {
       throw DioException(
-          requestOptions: res.requestOptions,
-          error: 'No access_token in response',);
+        requestOptions: res.requestOptions,
+        error: 'No access_token in response',
+      );
     }
     await setToken(token, persist: persist);
     return data;

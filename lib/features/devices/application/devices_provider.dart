@@ -86,17 +86,25 @@ final devicesProvider =
   // online state + hardware_info.activity stay live; autoDispose stops
   // the loop when nothing is looking.
   final timer = Timer.periodic(
-      const Duration(seconds: 30), (_) => ref.invalidateSelf(),);
+    const Duration(seconds: 30),
+    (_) => ref.invalidateSelf(),
+  );
   ref.onDispose(timer.cancel);
   final client = BrainClient.instance;
   Map<String, dynamic> payload;
   try {
-    payload = await client.getJson('/device/list?include_offline=true');
+    payload = await client.getJson(
+      '/device/list?include_offline=true',
+      timeout: const Duration(seconds: 12),
+    );
   } catch (_) {
     // Brain cold-starts can 500/timeout on the first hit — retry once
     // before surfacing an error so the page doesn't flash a failure.
     await Future<void>.delayed(const Duration(milliseconds: 1200));
-    payload = await client.getJson('/device/list?include_offline=true');
+    payload = await client.getJson(
+      '/device/list?include_offline=true',
+      timeout: const Duration(seconds: 12),
+    );
   }
   final items = (payload['devices'] ?? payload['data'] ?? []) as List;
   return items

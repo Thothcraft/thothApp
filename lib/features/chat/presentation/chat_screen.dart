@@ -24,6 +24,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   final List<_Msg> _msgs = [];
   final List<ChatAttachment> _pending = [];
   bool _sending = false;
+  bool _loadingHistory = true;
   // Model pick sent to /v1/chat — the hub maps '4'→gpt-4o,
   // '5'→gpt-4.1, '6'→gpt-5 (env-overridable server-side).
   String _model = '4';
@@ -40,6 +41,57 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     'Where is the watch?',
     'What happened in the last hour?',
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadHistory();
+  }
+
+  Future<void> _loadHistory() async {
+    try {
+      final turns = await _repo.history().timeout(const Duration(seconds: 8));
+      if (!mounted) return;
+      setState(() {
+        _msgs
+          ..clear()
+          ..addAll(turns.map(_Msg.fromTurn));
+      });
+    } catch (_) {
+      // The composer remains usable while the server transcript is offline.
+    } finally {
+      if (mounted) setState(() => _loadingHistory = false);
+    }
+  }
+
+  Future<void> _startNewChat() async {
+    final clear = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Start a new chat?'),
+        content: const Text(
+          'This clears the shared chat history on the app and hub.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Clear history'),
+          ),
+        ],
+      ),
+    );
+    if (clear != true) return;
+    try {
+      await _repo.clearHistory();
+      if (mounted) setState(_msgs.clear);
+    } catch (e) {
+      _snack('Could not clear shared history: $e');
+    }
+  }
 
   @override
   void dispose() {
@@ -62,17 +114,29 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     _scrollToEnd();
     try {
       final history = _msgs
-          .where((m) =>
-              !m.thinking && !m.isError && m.content.isNotEmpty,)
-          .map((m) => ChatTurn(
-              role: m.isUser ? 'user' : 'assistant', content: m.content,),)
+          .where(
+            (m) => !m.thinking && !m.isError && m.content.isNotEmpty,
+          )
+          .map(
+            (m) => ChatTurn(
+              role: m.isUser ? 'user' : 'assistant',
+              content: m.content,
+            ),
+          )
           .toList();
-      final ans = await _repo.send(text,
-          history: history.length > 12
-              ? history.sublist(history.length - 12)
-              : history,
-          attachments: atts,
-          model: _model,);
+      // The server appends the current message to model context itself.
+      if (history.isNotEmpty && history.last.role == 'user') {
+        history.removeLast();
+      }
+      final ans = await _repo.send(
+        text,
+        chatId: 'main',
+        history: history.length > 12
+            ? history.sublist(history.length - 12)
+            : history,
+        attachments: atts,
+        model: _model,
+      );
       if (!mounted) return;
       setState(() {
         _msgs.removeWhere((m) => m.thinking);
@@ -81,19 +145,23 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     } on DioException catch (e) {
       if (!mounted) return;
       final code = e.response?.statusCode;
-      final detail = e.response?.data is Map
-          ? '${e.response?.data['detail'] ?? ''}'
-          : '';
+      final detail =
+          e.response?.data is Map ? '${e.response?.data['detail'] ?? ''}' : '';
       setState(() {
         _msgs.removeWhere((m) => m.thinking);
-        _msgs.add(_Msg.error(switch (code) {
-          402 || 429 =>
-            'Inference quota reached — upgrade your plan or wait for the monthly reset.',
-          503 =>
-            'Assistant is not configured on the server yet (missing model key).',
-          _ => 'Chat failed${code != null ? ' ($code)' : ''}'
-              '${detail.isNotEmpty ? ': $detail' : ''}',
-        },),);
+        _msgs.add(
+          _Msg.error(
+            switch (code) {
+              402 ||
+              429 =>
+                'Inference quota reached — upgrade your plan or wait for the monthly reset.',
+              503 =>
+                'Assistant is not configured on the server yet (missing model key).',
+              _ => 'Chat failed${code != null ? ' ($code)' : ''}'
+                  '${detail.isNotEmpty ? ': $detail' : ''}',
+            },
+          ),
+        );
       });
     } catch (e) {
       if (!mounted) return;
@@ -112,9 +180,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   void _scrollToEnd() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scroll.hasClients) {
-        _scroll.animateTo(_scroll.position.maxScrollExtent,
-            duration: const Duration(milliseconds: 250),
-            curve: Curves.easeOut,);
+        _scroll.animateTo(
+          _scroll.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        );
       }
     });
   }
@@ -123,8 +193,18 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final picked = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: [
-        'png', 'jpg', 'jpeg', 'gif', 'webp', 'heic',
-        'txt', 'md', 'csv', 'json', 'log', 'pdf',
+        'png',
+        'jpg',
+        'jpeg',
+        'gif',
+        'webp',
+        'heic',
+        'txt',
+        'md',
+        'csv',
+        'json',
+        'log',
+        'pdf',
       ],
       withData: true,
     );
@@ -149,10 +229,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       'csv' => 'text/csv',
       _ => 'text/plain',
     };
-    setState(() => _pending.add(ChatAttachment(
-        name: f.name,
-        mime: mime,
-        dataB64: base64Encode(bytes),),),);
+    setState(
+      () => _pending.add(
+        ChatAttachment(
+          name: f.name,
+          mime: mime,
+          dataB64: base64Encode(bytes),
+        ),
+      ),
+    );
   }
 
   void _snack(String msg) =>
@@ -162,12 +247,19 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Row(children: [
-          Icon(Icons.auto_awesome, size: 20),
-          SizedBox(width: 8),
-          Text('Assistant'),
-        ],),
+        title: const Row(
+          children: [
+            Icon(Icons.auto_awesome, size: 20),
+            SizedBox(width: 8),
+            Text('Assistant'),
+          ],
+        ),
         actions: [
+          IconButton(
+            tooltip: 'New chat — clear shared history',
+            icon: const Icon(Icons.delete_sweep_outlined),
+            onPressed: _sending ? null : _startNewChat,
+          ),
           IconButton(
             tooltip: 'Context & settings — what feeds the model',
             icon: const Icon(Icons.tune),
@@ -181,45 +273,51 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         ],
       ),
       body: SafeArea(
-        child: Column(children: [
-          Expanded(
-            child: _msgs.isEmpty
-                ? _emptyState()
-                : ListView.builder(
-                    controller: _scroll,
-                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-                    itemCount: _msgs.length,
-                    itemBuilder: (c, i) => _bubble(_msgs[i]),
-                  ),
-          ),
-          if (_pending.isNotEmpty)
-            SizedBox(
-              height: 40,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                children: [
-                  for (final a in _pending)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: InputChip(
-                        avatar: Icon(
+        child: Column(
+          children: [
+            Expanded(
+              child: _loadingHistory
+                  ? const Center(child: CircularProgressIndicator())
+                  : _msgs.isEmpty
+                      ? _emptyState()
+                      : ListView.builder(
+                          controller: _scroll,
+                          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                          itemCount: _msgs.length,
+                          itemBuilder: (c, i) => _bubble(_msgs[i]),
+                        ),
+            ),
+            if (_pending.isNotEmpty)
+              SizedBox(
+                height: 40,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  children: [
+                    for (final a in _pending)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: InputChip(
+                          avatar: Icon(
                             a.mime.startsWith('image/')
                                 ? Icons.image
                                 : Icons.description,
-                            size: 16,),
-                        label: Text(a.name,
-                            style: const TextStyle(fontSize: 12),),
-                        onDeleted: () =>
-                            setState(() => _pending.remove(a)),
+                            size: 16,
+                          ),
+                          label: Text(
+                            a.name,
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                          onDeleted: () => setState(() => _pending.remove(a)),
+                        ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          _modelPicker(),
-          _composer(),
-        ],),
+            _modelPicker(),
+            _composer(),
+          ],
+        ),
       ),
     );
   }
@@ -227,35 +325,44 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   Widget _modelPicker() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 2, 16, 0),
-      child: Row(children: [
-        const Icon(Icons.psychology,
-            size: 16, color: Colors.grey,),
-        const SizedBox(width: 8),
-        const Text('Model',
-            style: TextStyle(fontSize: 11, color: Colors.grey),),
-        const SizedBox(width: 8),
-        Expanded(
-          child: SegmentedButton<String>(
-            segments: [
-              for (final e in _modelChoices.entries)
-                ButtonSegment(
-                    value: e.key,
-                    label: Text(e.value,
-                        style: const TextStyle(fontSize: 11),),),
-            ],
-            selected: {_model},
-            showSelectedIcon: false,
-            style: SegmentedButton.styleFrom(
-              visualDensity: VisualDensity.compact,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              selectedBackgroundColor:
-                  AppColors.primaryBlue.withValues(alpha: 0.16),
-            ),
-            onSelectionChanged: (s) =>
-                setState(() => _model = s.first),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.psychology,
+            size: 16,
+            color: Colors.grey,
           ),
-        ),
-      ],),
+          const SizedBox(width: 8),
+          const Text(
+            'Model',
+            style: TextStyle(fontSize: 11, color: Colors.grey),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: SegmentedButton<String>(
+              segments: [
+                for (final e in _modelChoices.entries)
+                  ButtonSegment(
+                    value: e.key,
+                    label: Text(
+                      e.value,
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                  ),
+              ],
+              selected: {_model},
+              showSelectedIcon: false,
+              style: SegmentedButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                selectedBackgroundColor:
+                    AppColors.primaryBlue.withValues(alpha: 0.16),
+              ),
+              onSelectionChanged: (s) => setState(() => _model = s.first),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -266,9 +373,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         const SizedBox(height: 48),
         const Icon(Icons.auto_awesome, size: 56, color: AppColors.primaryBlue),
         const SizedBox(height: 16),
-        Text('Ask about your space',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.titleLarge,),
+        Text(
+          'Ask about your space',
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
         const SizedBox(height: 8),
         const Text(
           'Answers are grounded in your live semantic map, recent sensor '
@@ -293,23 +402,26 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     if (m.thinking) {
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 8),
-        child: Row(children: [
-          _Avatar(),
-          SizedBox(width: 8),
-          SizedBox(
+        child: Row(
+          children: [
+            _Avatar(),
+            SizedBox(width: 8),
+            SizedBox(
               width: 16,
               height: 16,
-              child: CircularProgressIndicator(strokeWidth: 2),),
-          SizedBox(width: 8),
-          Text('Thinking…', style: TextStyle(color: Colors.grey)),
-        ],),
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            SizedBox(width: 8),
+            Text('Thinking…', style: TextStyle(color: Colors.grey)),
+          ],
+        ),
       );
     }
-    final align =
-        m.isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start;
+    final align = m.isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start;
     final bubble = Container(
       constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.82,),
+        maxWidth: MediaQuery.of(context).size.width * 0.82,
+      ),
       margin: const EdgeInsets.symmetric(vertical: 4),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
@@ -317,9 +429,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             ? AppColors.primaryBlue
             : m.isError
                 ? Colors.red.withValues(alpha: 0.08)
-                : Theme.of(context)
-                    .colorScheme
-                    .surfaceContainerHighest,
+                : Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.only(
           topLeft: const Radius.circular(16),
           topRight: const Radius.circular(16),
@@ -332,41 +442,53 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 for (final a in m.attachments)
-                  Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
                         a.mime.startsWith('image/')
                             ? Icons.image
                             : Icons.attach_file,
                         size: 14,
-                        color: Colors.white70,),
-                    const SizedBox(width: 4),
-                    Flexible(
-                        child: Text(a.name,
-                            style: const TextStyle(
-                                color: Colors.white70, fontSize: 11,),
-                            overflow: TextOverflow.ellipsis,),),
-                  ],),
+                        color: Colors.white70,
+                      ),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          a.name,
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 11,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
                 if (m.attachments.isNotEmpty && m.content.isNotEmpty)
                   const SizedBox(height: 4),
                 if (m.content.isNotEmpty)
-                  SelectableText(m.content,
-                      style: const TextStyle(color: Colors.white),),
+                  SelectableText(
+                    m.content,
+                    style: const TextStyle(color: Colors.white),
+                  ),
               ],
             )
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _MarkdownText(m.content,
-                    color: m.isError
-                        ? Colors.red.shade700
-                        : Theme.of(context)
-                            .colorScheme
-                            .onSurface,),
+                _MarkdownText(
+                  m.content,
+                  color: m.isError
+                      ? Colors.red.shade700
+                      : Theme.of(context).colorScheme.onSurface,
+                ),
                 if (m.assessments.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
                     child: Wrap(
-                      spacing: 6, runSpacing: 4,
+                      spacing: 6,
+                      runSpacing: 4,
                       children: [
                         for (final a in m.assessments)
                           Tooltip(
@@ -377,7 +499,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                               label: Text(
                                 'p=${((a['probability'] as num?) ?? 0).toStringAsFixed(2)} · '
                                 '${a['claim'] ?? ''}',
-                                style: const TextStyle(fontSize: 10),),
+                                style: const TextStyle(fontSize: 10),
+                              ),
                             ),
                           ),
                       ],
@@ -386,9 +509,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 if (m.modelId != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 6),
-                    child: Text(m.modelId!,
-                        style: const TextStyle(
-                            fontSize: 10, color: Colors.grey,),),
+                    child: Text(
+                      m.modelId!,
+                      style: const TextStyle(
+                        fontSize: 10,
+                        color: Colors.grey,
+                      ),
+                    ),
                   ),
                 for (final w in m.widgets) _WidgetView(w, _send),
                 if (m.contextUsed != null)
@@ -396,15 +523,24 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     padding: const EdgeInsets.only(top: 8),
                     child: InkWell(
                       onTap: () => _showContextDialog(m.contextUsed!),
-                      child: const Row(mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.dataset_outlined,
-                                size: 14, color: Colors.grey,),
-                            SizedBox(width: 4),
-                            Text('context used',
-                                style: TextStyle(
-                                    fontSize: 11, color: Colors.grey,),),
-                          ],),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.dataset_outlined,
+                            size: 14,
+                            color: Colors.grey,
+                          ),
+                          SizedBox(width: 4),
+                          Text(
+                            'context used',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
               ],
@@ -413,9 +549,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Row(
-        mainAxisAlignment: m.isUser
-            ? MainAxisAlignment.end
-            : MainAxisAlignment.start,
+        mainAxisAlignment:
+            m.isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (!m.isUser) const _Avatar(),
@@ -434,35 +569,39 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
         border: Border(
-            top: BorderSide(
-                color: Theme.of(context).dividerColor.withValues(alpha: 0.4),),),
-      ),
-      child: Row(children: [
-        IconButton(
-          tooltip: 'Attach a file or image',
-          icon: const Icon(Icons.attach_file),
-          onPressed: _sending ? null : _attach,
-        ),
-        Expanded(
-          child: TextField(
-            controller: _input,
-            minLines: 1,
-            maxLines: 5,
-            textCapitalization: TextCapitalization.sentences,
-            onSubmitted: (_) => _send(),
-            decoration: const InputDecoration(
-              hintText: 'Ask the assistant…',
-              border: InputBorder.none,
-              isDense: true,
-            ),
+          top: BorderSide(
+            color: Theme.of(context).dividerColor.withValues(alpha: 0.4),
           ),
         ),
-        IconButton(
-          tooltip: 'Send',
-          icon: const Icon(Icons.send, color: AppColors.primaryBlue),
-          onPressed: _sending ? null : () => _send(),
-        ),
-      ],),
+      ),
+      child: Row(
+        children: [
+          IconButton(
+            tooltip: 'Attach a file or image',
+            icon: const Icon(Icons.attach_file),
+            onPressed: _sending ? null : _attach,
+          ),
+          Expanded(
+            child: TextField(
+              controller: _input,
+              minLines: 1,
+              maxLines: 5,
+              textCapitalization: TextCapitalization.sentences,
+              onSubmitted: (_) => _send(),
+              decoration: const InputDecoration(
+                hintText: 'Ask the assistant…',
+                border: InputBorder.none,
+                isDense: true,
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Send',
+            icon: const Icon(Icons.send, color: AppColors.primaryBlue),
+            onPressed: _sending ? null : () => _send(),
+          ),
+        ],
+      ),
     );
   }
 
@@ -482,13 +621,18 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final cfg = Map<String, dynamic>.from(bundle['config'] as Map? ?? {});
     cfg['window_s'] ??= 900.0;
     for (final k in const [
-      'include_scenes', 'include_descriptors', 'include_reference',
-      'include_builder', 'include_usage', 'include_persons_places',
+      'include_scenes',
+      'include_descriptors',
+      'include_reference',
+      'include_builder',
+      'include_usage',
+      'include_persons_places',
     ]) {
       cfg[k] ??= true;
     }
     final prov = Map<String, dynamic>.from(
-        bundle['provenance'] as Map? ?? {},);
+      bundle['provenance'] as Map? ?? {},
+    );
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -500,25 +644,31 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             controller: scroll,
             padding: const EdgeInsets.all(16),
             children: [
-              Text('What feeds the assistant',
-                  style: Theme.of(ctx).textTheme.titleMedium,),
+              Text(
+                'What feeds the assistant',
+                style: Theme.of(ctx).textTheme.titleMedium,
+              ),
               const SizedBox(height: 12),
               _feedSections(bundle, prov),
               const Divider(height: 28),
-              Text('Your configuration',
-                  style: Theme.of(ctx).textTheme.titleSmall,),
+              Text(
+                'Your configuration',
+                style: Theme.of(ctx).textTheme.titleSmall,
+              ),
               const SizedBox(height: 8),
-              Row(children: [
-                const Expanded(child: Text('Evidence window')), 
-                Text('${(cfg['window_s'] as num).round() ~/ 60} min'),
-              ],),
+              Row(
+                children: [
+                  const Expanded(child: Text('Evidence window')),
+                  Text('${(cfg['window_s'] as num).round() ~/ 60} min'),
+                ],
+              ),
               Slider(
-                min: 1, max: 240, divisions: 48,
-                value: ((cfg['window_s'] as num).toDouble() / 60)
-                    .clamp(1, 240),
+                min: 1,
+                max: 240,
+                divisions: 48,
+                value: ((cfg['window_s'] as num).toDouble() / 60).clamp(1, 240),
                 label: '${(cfg['window_s'] as num).round() ~/ 60} min',
-                onChanged: (v) =>
-                    setS(() => cfg['window_s'] = v * 60.0),
+                onChanged: (v) => setS(() => cfg['window_s'] = v * 60.0),
               ),
               for (final e in const [
                 ('include_descriptors', 'Sensor descriptors'),
@@ -530,7 +680,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               ])
                 SwitchListTile(
                   dense: true,
-                  title: Text(e.$2, style: const TextStyle(fontSize: 13),),
+                  title: Text(
+                    e.$2,
+                    style: const TextStyle(fontSize: 13),
+                  ),
                   value: cfg[e.$1] == true,
                   onChanged: (v) => setS(() => cfg[e.$1] = v),
                 ),
@@ -557,10 +710,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   /// Read-only half of the feed sheet — sections the model received
   /// with counts, live descriptor keys, owned devices, persons/places
   /// and the provenance caps.
-  Widget _feedSections(Map<String, dynamic> bundle,
-      Map<String, dynamic> prov,) {
-    final sections =
-        [for (final s in (prov['sections'] as List? ?? [])) '$s'];
+  Widget _feedSections(
+    Map<String, dynamic> bundle,
+    Map<String, dynamic> prov,
+  ) {
+    final sections = [for (final s in (prov['sections'] as List? ?? [])) '$s'];
     final descKeys = [
       for (final d in (bundle['descriptors'] as List? ?? const []))
         if (d is Map) '${d['key']}@${d['device']}',
@@ -576,43 +730,65 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         if (p is Map) '${p['id']}${p['name'] != null ? ' (${p['name']})' : ''}',
     ];
     final picks = Map<String, dynamic>.from(
-        prov['model_picks'] as Map? ?? {},);
-    Widget tile(IconData i, String title, List<String> lines) =>
-        ExpansionTile(
+      prov['model_picks'] as Map? ?? {},
+    );
+    Widget tile(IconData i, String title, List<String> lines) => ExpansionTile(
           dense: true,
           tilePadding: EdgeInsets.zero,
           leading: Icon(i, size: 18),
-          title: Text(title, style: const TextStyle(fontSize: 13),),
-          subtitle: Text('${lines.length} item(s)',
-              style: const TextStyle(fontSize: 11, color: Colors.grey),),
+          title: Text(
+            title,
+            style: const TextStyle(fontSize: 13),
+          ),
+          subtitle: Text(
+            '${lines.length} item(s)',
+            style: const TextStyle(fontSize: 11, color: Colors.grey),
+          ),
           children: [
             for (final l in lines.take(12))
               Align(
                 alignment: Alignment.centerLeft,
                 child: Padding(
                   padding: const EdgeInsets.only(left: 16, bottom: 2),
-                  child: Text(l,
-                      style: const TextStyle(fontSize: 11,
-                          fontFamily: 'monospace',),),),
+                  child: Text(
+                    l,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
               ),
           ],
         );
-    return Column(children: [
-      tile(Icons.layers_outlined, 'Bundle sections',
-          sections.map((s) =>
-              '$s — ${bundle[s] is List ? (bundle[s] as List).length : bundle[s] is Map ? '1' : ''}',).toList(),),
-      tile(Icons.sensors, 'Descriptor feeds', descKeys),
-      tile(Icons.devices, 'Owned devices (person:owner)', devices),
-      tile(Icons.people_outline, 'Persons', persons),
-      tile(Icons.tune, 'Model picks',
-          [for (final e in picks.entries) '${e.key} → ${e.value}'],),
-      tile(Icons.rule,
-          'Caps',
-          ['history: ${prov['history']?['max_turns'] ?? '?'} turns × '
+    return Column(
+      children: [
+        tile(
+          Icons.layers_outlined,
+          'Bundle sections',
+          sections
+              .map(
+                (s) =>
+                    '$s — ${bundle[s] is List ? (bundle[s] as List).length : bundle[s] is Map ? '1' : ''}',
+              )
+              .toList(),
+        ),
+        tile(Icons.sensors, 'Descriptor feeds', descKeys),
+        tile(Icons.devices, 'Owned devices (person:owner)', devices),
+        tile(Icons.people_outline, 'Persons', persons),
+        tile(
+          Icons.tune,
+          'Model picks',
+          [for (final e in picks.entries) '${e.key} → ${e.value}'],
+        ),
+        tile(Icons.rule, 'Caps', [
+          'history: ${prov['history']?['max_turns'] ?? '?'} turns × '
               '${prov['history']?['max_chars_per_turn'] ?? '?'} chars',
-            'attachments: ${prov['attachments']?['max'] ?? '?'} × '
-                '${((prov['attachments']?['image_bytes'] ?? 0) as num) ~/ 1048576} MB',]),
-    ],);
+          'attachments: ${prov['attachments']?['max'] ?? '?'} × '
+              '${((prov['attachments']?['image_bytes'] ?? 0) as num) ~/ 1048576} MB',
+        ]),
+      ],
+    );
   }
 
   Future<void> _showContext() async {
@@ -654,21 +830,27 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               _ctxRow('Window', '${bundle['window_s'] ?? '?'}s'),
               if (usage.isNotEmpty) ...[
                 const Divider(),
-                _ctxRow('Inference used', '${usage['used'] ?? '?'}'
-                    '${usage['limit'] != null ? ' / ${usage['limit']}' : ''}'),
+                _ctxRow(
+                    'Inference used',
+                    '${usage['used'] ?? '?'}'
+                        '${usage['limit'] != null ? ' / ${usage['limit']}' : ''}'),
               ],
               const Divider(),
               SelectableText(
                 const JsonEncoder.withIndent('  ').convert(bundle),
                 style: const TextStyle(
-                    fontFamily: 'monospace', fontSize: 10.5,),
+                  fontFamily: 'monospace',
+                  fontSize: 10.5,
+                ),
               ),
             ],
           ),
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(c), child: const Text('Close'),),
+            onPressed: () => Navigator.pop(c),
+            child: const Text('Close'),
+          ),
         ],
       ),
     );
@@ -678,13 +860,29 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         padding: const EdgeInsets.symmetric(vertical: 2),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [Text(k), Text(v,
-              style: const TextStyle(fontWeight: FontWeight.w600),),],
+          children: [
+            Text(k),
+            Text(
+              v,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ],
         ),
       );
 }
 
 class _Msg {
+  _Msg.fromTurn(ChatTurn turn)
+      : isUser = turn.role == 'user',
+        isError = false,
+        thinking = false,
+        content = turn.content,
+        attachments = const [],
+        assessments = const [],
+        widgets = const [],
+        contextUsed = null,
+        modelId = null;
+
   _Msg.user(String text, List<ChatAttachment> atts)
       : isUser = true,
         isError = false,
@@ -776,8 +974,12 @@ class _WidgetView extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text('• '),
-                    Expanded(child: Text('$it',
-                        style: const TextStyle(fontSize: 13),),),
+                    Expanded(
+                      child: Text(
+                        '$it',
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -792,23 +994,30 @@ class _WidgetView extends StatelessWidget {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('${(it as Map)['label'] ?? ''}',
-                        style: const TextStyle(
-                            fontSize: 13, color: Colors.grey,),),
+                    Text(
+                      '${(it as Map)['label'] ?? ''}',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: Colors.grey,
+                      ),
+                    ),
                     Flexible(
-                        child: Text('${it['value'] ?? ''}',
-                            style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,),),),
+                      child: Text(
+                        '${it['value'] ?? ''}',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
           ],
         );
       case 'table':
-        final cols = (w['columns'] as List? ?? const [])
-            .map((c) => '$c')
-            .toList();
+        final cols =
+            (w['columns'] as List? ?? const []).map((c) => '$c').toList();
         final rows = (w['rows'] as List? ?? const [])
             .map((r) => (r as List).map((c) => '$c').toList())
             .toList();
@@ -817,25 +1026,34 @@ class _WidgetView extends StatelessWidget {
           child: Table(
             defaultColumnWidth: const IntrinsicColumnWidth(),
             children: [
-              TableRow(children: [
-                for (final cName in cols)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 16, bottom: 4),
-                    child: Text(cName,
-                        style: const TextStyle(
-                            fontSize: 12, fontWeight: FontWeight.w700,),),
-                  ),
-              ],),
-              for (final r in rows)
-                TableRow(children: [
-                  for (final cell in r)
+              TableRow(
+                children: [
+                  for (final cName in cols)
                     Padding(
-                      padding:
-                          const EdgeInsets.only(right: 16, top: 2),
-                      child: Text(cell,
-                          style: const TextStyle(fontSize: 12),),
+                      padding: const EdgeInsets.only(right: 16, bottom: 4),
+                      child: Text(
+                        cName,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                     ),
-                ],),
+                ],
+              ),
+              for (final r in rows)
+                TableRow(
+                  children: [
+                    for (final cell in r)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 16, top: 2),
+                        child: Text(
+                          cell,
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ),
+                  ],
+                ),
             ],
           ),
         );
@@ -848,22 +1066,29 @@ class _WidgetView extends StatelessWidget {
                   dense: true,
                   contentPadding: EdgeInsets.zero,
                   leading: Icon(
-                      it['confirmed'] == true
-                          ? Icons.verified
-                          : Icons.help_outline,
-                      size: 16,
-                      color: it['confirmed'] == true
-                          ? Colors.green
-                          : Colors.orange,),
-                  title: Text('${it['key'] ?? ''}',
-                      style: const TextStyle(fontSize: 12.5),),
-                  subtitle: Text('${it['entity'] ?? ''} → ${it['value']}',
-                      style: const TextStyle(fontSize: 11),),
+                    it['confirmed'] == true
+                        ? Icons.verified
+                        : Icons.help_outline,
+                    size: 16,
+                    color:
+                        it['confirmed'] == true ? Colors.green : Colors.orange,
+                  ),
+                  title: Text(
+                    '${it['key'] ?? ''}',
+                    style: const TextStyle(fontSize: 12.5),
+                  ),
+                  subtitle: Text(
+                    '${it['entity'] ?? ''} → ${it['value']}',
+                    style: const TextStyle(fontSize: 11),
+                  ),
                   trailing: it['confidence'] != null
                       ? Text(
                           '${((it['confidence'] as num) * 100).round()}%',
                           style: const TextStyle(
-                              fontSize: 11, color: Colors.grey,),)
+                            fontSize: 11,
+                            color: Colors.grey,
+                          ),
+                        )
                       : null,
                 ),
           ],
@@ -881,8 +1106,10 @@ class _WidgetView extends StatelessWidget {
           ],
         );
       default:
-        body = Text('${w['type']}: ${w['items'] ?? ''}',
-            style: const TextStyle(fontSize: 12, color: Colors.grey),);
+        body = Text(
+          '${w['type']}: ${w['items'] ?? ''}',
+          style: const TextStyle(fontSize: 12, color: Colors.grey),
+        );
     }
     return Container(
       margin: const EdgeInsets.only(top: 8),
@@ -891,8 +1118,8 @@ class _WidgetView extends StatelessWidget {
         color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-            color:
-                Theme.of(context).dividerColor.withValues(alpha: 0.5),),
+          color: Theme.of(context).dividerColor.withValues(alpha: 0.5),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -900,9 +1127,13 @@ class _WidgetView extends StatelessWidget {
           if (title != null && title.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(bottom: 6),
-              child: Text(title,
-                  style: const TextStyle(
-                      fontSize: 12, fontWeight: FontWeight.w700,),),
+              child: Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ),
           body,
         ],
@@ -958,27 +1189,38 @@ class _MarkdownText extends StatelessWidget {
   static List<InlineSpan> _inline(String s, TextStyle base) {
     final spans = <InlineSpan>[];
     final re = RegExp(
-        r'(\*\*(.+?)\*\*)|(\*(.+?)\*)|(`(.+?)`)|(__(.+?)__)',);
+      r'(\*\*(.+?)\*\*)|(\*(.+?)\*)|(`(.+?)`)|(__(.+?)__)',
+    );
     var pos = 0;
     for (final m in re.allMatches(s)) {
       if (m.start > pos) {
         spans.add(TextSpan(text: s.substring(pos, m.start), style: base));
       }
       if (m.group(2) != null || m.group(7) != null) {
-        spans.add(TextSpan(
+        spans.add(
+          TextSpan(
             text: m.group(2) ?? m.group(7),
-            style: base.copyWith(fontWeight: FontWeight.w700),),);
+            style: base.copyWith(fontWeight: FontWeight.w700),
+          ),
+        );
       } else if (m.group(4) != null) {
-        spans.add(TextSpan(
+        spans.add(
+          TextSpan(
             text: m.group(4),
-            style: base.copyWith(fontStyle: FontStyle.italic),),);
+            style: base.copyWith(fontStyle: FontStyle.italic),
+          ),
+        );
       } else if (m.group(6) != null) {
-        spans.add(TextSpan(
+        spans.add(
+          TextSpan(
             text: m.group(6),
             style: base.copyWith(
-                fontFamily: 'monospace',
-                fontSize: base.fontSize! - 1,
-                backgroundColor: Colors.grey.withValues(alpha: 0.18),),),);
+              fontFamily: 'monospace',
+              fontSize: base.fontSize! - 1,
+              backgroundColor: Colors.grey.withValues(alpha: 0.18),
+            ),
+          ),
+        );
       }
       pos = m.end;
     }

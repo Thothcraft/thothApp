@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -56,14 +58,17 @@ class AuthNotifier extends StateNotifier<AuthState> {
       return;
     }
     try {
-      final profile = await _client.getJson('/profile');
-      await _loadEntitlements();
+      final profile = await _client.getJson(
+        '/profile',
+        timeout: const Duration(seconds: 12),
+      );
       state = state.copyWith(
         isLoading: false,
         isAuthenticated: true,
         username: profile['username'] as String?,
         plan: (profile['plan'] as String?) ?? 'free',
       );
+      unawaited(_loadEntitlements());
       EventFeed.instance.start();
     } catch (e) {
       // Only a definitive 401/403 means the credential is dead — a
@@ -99,13 +104,15 @@ class AuthNotifier extends StateNotifier<AuthState> {
     } catch (_) {/* best-effort */}
   }
 
-  Future<bool> login(String username, String password,
-      {bool rememberDevice = true,}) async {
+  Future<bool> login(
+    String username,
+    String password, {
+    bool rememberDevice = true,
+  }) async {
     state = state.copyWith(isLoading: true, error: null);
     try {
-      final data =
-          await _client.login(username.trim(), password, persist: rememberDevice);
-      await _loadEntitlements();
+      final data = await _client.login(username.trim(), password,
+          persist: rememberDevice);
       final uname = data['username'] as String? ?? username.trim();
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('settings.username', uname);
@@ -115,11 +122,14 @@ class AuthNotifier extends StateNotifier<AuthState> {
         username: uname,
         plan: (data['plan'] as String?) ?? 'free',
       );
+      unawaited(_loadEntitlements());
       EventFeed.instance.start();
       return true;
     } catch (e) {
       state = state.copyWith(
-          isLoading: false, error: 'Invalid username or password',);
+        isLoading: false,
+        error: 'Invalid username or password',
+      );
       return false;
     }
   }

@@ -38,7 +38,8 @@ class _BleMapViewState extends State<BleMapView> {
   final TransformationController _viewCtl = TransformationController();
 
   /// Anonymous advertisers can flood the canvas — user can hide them.
-  bool _showUnknowns = false;
+  // Every recently observed transmitter is discoverable on first open.
+  bool _showUnknowns = true;
 
   /// EMA of solved positions - multilaterated nodes glide between
   /// sighting bursts instead of jumping each rebuild.
