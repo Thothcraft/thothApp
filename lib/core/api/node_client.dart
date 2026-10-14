@@ -113,6 +113,33 @@ class NodeClient {
 
   Future<void> stopCapture(String deviceId, String captureId) =>
       post(deviceId, '/api/captures/stop', body: {'capture_id': captureId});
+
+  // ---- node Wi-Fi (first-time setup) -----------------------------------
+
+  /// Provisioning state + link info — `{state, wifi:{ssid,ip,…}, …}`.
+  Future<Map<String, dynamic>> netStatus(String deviceId) =>
+      getMap(deviceId, '/api/v1/net');
+
+  /// Visible Wi-Fi networks — `{ssid, signal, security}` list.
+  Future<List<Map<String, dynamic>>> netScan(String deviceId) async {
+    final res = await getMap(deviceId, '/api/v1/net/scan');
+    return (res['networks'] as List? ?? const [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
+  /// Hand SSID/PSK to the node — it joins that network (this Pi's Wi-Fi,
+  /// not the phone's). The request is queued on the node's provisioning
+  /// worker; poll [netStatus] for the outcome.
+  Future<dynamic> netConnect(String deviceId, String ssid,
+          {String psk = '', bool hidden = false}) =>
+      post(deviceId, '/api/v1/net',
+          body: {'ssid': ssid, 'psk': psk, 'hidden': hidden});
+
+  /// Drop the node's Wi-Fi link — re-engages its BLE/AP commissioning
+  /// surface (first-time setup).
+  Future<dynamic> netDisconnect(String deviceId) =>
+      post(deviceId, '/api/v1/net/disconnect');
 }
 
 class NodeRelayException implements Exception {

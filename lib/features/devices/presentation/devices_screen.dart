@@ -67,10 +67,10 @@ class DevicesScreen extends ConsumerWidget {
                       onPressed: () => showModalBottomSheet(
                         context: context,
                         isScrollControlled: true,
-                        builder: (_) => const WatchScanSheet(),
+                        builder: (_) => const AccessoryScanSheet(),
                       ),
                       icon: const Icon(Icons.watch),
-                      label: const Text('Add PineTime watch'),
+                      label: const Text('Add accessory (watch / buds)'),
                     ),
                   );
                 }

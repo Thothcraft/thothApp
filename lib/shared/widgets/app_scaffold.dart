@@ -137,7 +137,7 @@ class AppScaffold extends ConsumerWidget {
           ),
 
           const _DrawerLabel('System'),
-          _item(context, Icons.watch_outlined, 'Watch (PineTime)',
+          _item(context, Icons.watch_outlined, 'Accessories (watch · buds)',
               () => context.go(AppRoutes.watch),),
           _item(context, Icons.toggle_on_outlined, 'Actions · automation · context',
               () => context.go(AppRoutes.actions),),

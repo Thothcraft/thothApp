@@ -30,7 +30,9 @@ const kWatchSensorGps = 'pinetime-gps';   // phone GPS trace
 class WatchRelay {
   WatchRelay(this.record);
 
-  final WatchRecord record;
+  /// Mutates when the deferred Brain pairing lands — heartbeats pick up
+  /// the device token without rebuilding the BLE link.
+  WatchRecord record;
   WatchLink? _link;
 
   final _telemetryOut = StreamController<WatchTelemetry>.broadcast();

@@ -184,6 +184,8 @@ class _OverviewTab extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: 12),
+          _NetworkCard(deviceId: deviceId),
+          const SizedBox(height: 12),
           _ActivityCard(deviceId: deviceId),
           const SizedBox(height: 12),
           sensors.when(
@@ -382,6 +384,287 @@ class _ActivityCard extends ConsumerWidget {
           ],
         ),
       );
+}
+
+/// Node Wi-Fi card — the Pi's own link, not the phone's. First-time
+/// setup lives here: scan for networks, hand credentials, or drop the
+/// link to re-engage the node's BLE/AP commissioning surface.
+class _NetworkCard extends ConsumerWidget {
+  const _NetworkCard({required this.deviceId});
+  final String deviceId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final net = ref.watch(deviceNetProvider(deviceId));
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: net.when(
+          loading: () => const Center(
+              child: Padding(
+                  padding: EdgeInsets.all(8),
+                  child: CircularProgressIndicator(),),),
+          error: (_, __) => const SizedBox.shrink(),
+          data: (m) {
+            if (m.isEmpty || m['enabled'] == false) {
+              return const SizedBox.shrink();
+            }
+            final wifi = m['wifi'] is Map
+                ? Map<String, dynamic>.from(m['wifi'] as Map)
+                : const <String, dynamic>{};
+            final connected = wifi['connected'] == true;
+            final state = '${m['state'] ?? 'unknown'}';
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Network',
+                    style: Theme.of(context).textTheme.titleMedium,),
+                const SizedBox(height: 8),
+                _kv('Wi-Fi',
+                    connected
+                        ? '${wifi['ssid'] ?? '?'}${wifi['ip'] != null ? ' (${wifi['ip']})' : ''}'
+                        : state),
+                if (m['last_error'] != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text('${m['last_error']}',
+                        style: const TextStyle(
+                            fontSize: 11, color: Colors.redAccent,),),
+                  ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    FilledButton.tonalIcon(
+                      icon: const Icon(Icons.wifi_tethering, size: 18),
+                      label: Text(connected
+                          ? 'Change network…'
+                          : 'Join a network…'),
+                      onPressed: () =>
+                          _joinSheet(context, ref),
+                    ),
+                    if (connected)
+                      TextButton.icon(
+                        icon: const Icon(Icons.wifi_off, size: 18,
+                            color: Colors.redAccent,),
+                        label: const Text('Disconnect',
+                            style: TextStyle(color: Colors.redAccent),),
+                        onPressed: () => _disconnect(context, ref),
+                      ),
+                  ],
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _disconnect(BuildContext context, WidgetRef ref) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        title: const Text('Disconnect Wi-Fi?'),
+        content: const Text(
+            'The node drops off the network — reach it again over its '
+            'BLE commissioning surface or the thoth-setup AP it '
+            'broadcasts after repeated failures.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dctx).pop(true),
+            child: const Text('Disconnect'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !context.mounted) return;
+    try {
+      await NodeClient.instance.netDisconnect(deviceId);
+      ref.invalidate(deviceNetProvider(deviceId));
+    } on NodeRelayException catch (e) {
+      _snack(context, e.message);
+    }
+  }
+
+  void _joinSheet(BuildContext context, WidgetRef ref) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => _WifiJoinSheet(deviceId: deviceId),
+    );
+  }
+
+  Widget _kv(String k, String v) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(k, style: const TextStyle(color: Colors.black54)),
+            Flexible(
+              child: Text(v,
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(fontWeight: FontWeight.w500),),
+            ),
+          ],
+        ),
+      );
+
+  void _snack(BuildContext context, String m) {
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(m)));
+  }
+}
+
+/// Bottom sheet: node-side Wi-Fi scan → tap a network → enter the PSK →
+/// the node joins it. Manual entry always available.
+class _WifiJoinSheet extends ConsumerStatefulWidget {
+  const _WifiJoinSheet({required this.deviceId});
+  final String deviceId;
+
+  @override
+  ConsumerState<_WifiJoinSheet> createState() => _WifiJoinSheetState();
+}
+
+class _WifiJoinSheetState extends ConsumerState<_WifiJoinSheet> {
+  late Future<List<Map<String, dynamic>>> _scan;
+  bool _sending = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _scan = NodeClient.instance.netScan(widget.deviceId);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom,),
+      child: DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.55,
+        builder: (context, scroll) => Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  const Expanded(
+                    child: Text('Join network',
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.bold,),),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.refresh),
+                    onPressed: () => setState(() {
+                      _scan =
+                          NodeClient.instance.netScan(widget.deviceId);
+                    }),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: FutureBuilder<List<Map<String, dynamic>>>(
+                future: _scan,
+                builder: (context, snap) {
+                  if (snap.connectionState != ConnectionState.done) {
+                    return const Center(
+                        child: CircularProgressIndicator());
+                  }
+                  final nets = snap.data ?? const [];
+                  if (nets.isEmpty) {
+                    return const Center(
+                        child: Text(
+                            'No networks found — the node may lack a '
+                            'Wi-Fi backend, or scanning is disabled.\n'
+                            'Tap a row after typing the SSID manually '
+                            'isn\'t supported yet.',
+                            textAlign: TextAlign.center,),);
+                  }
+                  return ListView.builder(
+                    controller: scroll,
+                    itemCount: nets.length,
+                    itemBuilder: (context, i) {
+                      final n = nets[i];
+                      final open = '${n['security'] ?? ''}'.isEmpty;
+                      return ListTile(
+                        dense: true,
+                        leading: Icon(open ? Icons.wifi : Icons.wifi_lock,
+                            size: 20,),
+                        title: Text('${n['ssid']}'),
+                        subtitle: Text('${n['signal'] ?? '—'}%'),
+                        onTap: _sending ? null : () => _join(n),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _join(Map<String, dynamic> net) async {
+    final ssid = '${net['ssid']}';
+    final open = '${net['security'] ?? ''}'.isEmpty;
+    String? psk;
+    if (!open) {
+      psk = await showDialog<String>(
+        context: context,
+        builder: (dctx) {
+          final ctl = TextEditingController();
+          return AlertDialog(
+            title: Text('Password for $ssid'),
+            content: TextField(
+              controller: ctl,
+              obscureText: true,
+              autofocus: true,
+              decoration:
+                  const InputDecoration(labelText: 'Wi-Fi password'),
+              onSubmitted: (_) => Navigator.of(dctx).pop(ctl.text),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dctx).pop(),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(dctx).pop(ctl.text),
+                child: const Text('Join'),
+              ),
+            ],
+          );
+        },
+      );
+      if (psk == null) return;
+    }
+    setState(() => _sending = true);
+    try {
+      await NodeClient.instance
+          .netConnect(widget.deviceId, ssid, psk: psk ?? '');
+      if (mounted) {
+        Navigator.of(context).pop();
+        ref.invalidate(deviceNetProvider(widget.deviceId));
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Joining network…')),);
+      }
+    } on NodeRelayException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
 }
 
 class _CapturesTab extends ConsumerWidget {

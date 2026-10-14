@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../context/application/context_providers.dart';
 import '../../context/domain/models.dart';
 import '../../devices/application/devices_provider.dart';
+import '../../earbuds/application/earbuds_providers.dart';
 import '../../watch/application/watch_providers.dart';
 
 /// Home — the daily driver screen. Apple-Home style: rooms first,
@@ -19,7 +20,9 @@ class HomeScreen extends ConsumerWidget {
     final spaces = ref.watch(spacesLiveProvider).valueOrNull ?? const [];
     final devices = ref.watch(devicesProvider).valueOrNull ?? const [];
     final watches = ref.watch(watchListProvider).valueOrNull ?? const [];
+    final buds = ref.watch(earbudsListProvider).valueOrNull ?? const [];
     final manager = ref.watch(watchManagerProvider);
+    final budsManager = ref.watch(earbudsManagerProvider);
     final events = ref.watch(contextEventsProvider).valueOrNull ?? const [];
     final snap = ref.watch(contextSnapshotProvider).valueOrNull;
 
@@ -75,6 +78,11 @@ class HomeScreen extends ConsumerWidget {
                 bleId: w.bleId,
                 name: w.name ?? 'PineTime',
                 connected: manager[w.bleId]?.connected ?? false,),
+          for (final b in buds)
+            _EarbudsTile(
+                bleId: b.bleId,
+                name: b.name ?? 'PineBuds',
+                connected: budsManager[b.bleId]?.connected ?? false,),
           _NodesCard(devices: devices),
           const SizedBox(height: 20),
 
@@ -306,6 +314,40 @@ class _PresenceStrip extends StatelessWidget {
       return '${v['space'] ?? v['name'] ?? v['space_id'] ?? ''}';
     }
     return '';
+  }
+}
+
+/// One paired buds set — connection dot + tap through to accessories.
+class _EarbudsTile extends ConsumerWidget {
+  const _EarbudsTile(
+      {required this.bleId, required this.name, required this.connected,});
+  final String bleId;
+  final String name;
+  final bool connected;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final conn = ref.watch(earbudsConnectionProvider(bleId)).valueOrNull;
+    final live = connected || conn == BluetoothConnectionState.connected;
+    final tele = ref.watch(earbudsTelemetryProvider(bleId)).valueOrNull;
+    final batt = tele?.status?.batteryPct;
+    return Card(
+      child: ListTile(
+        leading: Icon(Icons.earbuds,
+            color: live ? Colors.teal : Colors.grey, size: 30,),
+        title: Text(name),
+        subtitle: Text(
+            live
+                ? batt != null
+                    ? 'connected · $batt%'
+                    : 'connected'
+                : 'not connected',
+            style: TextStyle(
+                fontSize: 12, color: live ? Colors.teal : Colors.grey,),),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => context.push('/watch'),
+      ),
+    );
   }
 }
 

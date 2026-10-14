@@ -196,6 +196,42 @@ class WatchManager extends Notifier<Map<String, WatchRelay>> {
                   '${record.name ?? 'watch'} unreachable — keep it awake '
                   'and in range'),);
 
+  /// Non-blocking adopt — the record lands in secure storage
+  /// immediately (the card appears at once, no modal spinner), then the
+  /// BLE connect runs in the background. Brain pairing is deferred: on
+  /// failure the link still streams locally and the token is retried on
+  /// next launch.
+  Future<WatchRecord> adopt(String bleId, {String? name}) async {
+    final rec = WatchRecord(
+      bleId: bleId,
+      deviceUuid: WatchRelay.deviceUuidFor(bleId),
+      name: name ?? 'PineTime',
+    );
+    await WatchStore.instance.upsert(rec);
+    await ref.read(watchListProvider.notifier).refresh();
+    unawaited(() async {
+      try {
+        await connect(rec);
+      } catch (e) {
+        debugPrint('[watch] adopt connect: $e');
+      }
+    }());
+    unawaited(_pairInBackground(rec));
+    return rec;
+  }
+
+  Future<void> _pairInBackground(WatchRecord rec) async {
+    try {
+      final paired = await WatchRelay.pair(rec.bleId, name: rec.name);
+      await WatchStore.instance.upsert(paired);
+      await ref.read(watchListProvider.notifier).refresh();
+      state[rec.bleId]?.record = paired;
+    } catch (e) {
+      debugPrint('[watch] background pairing failed (retries on '
+          'next launch): $e');
+    }
+  }
+
   /// Pair + connect a newly scanned watch in one shot. [onStage]
   /// reports progress ('pairing' → 'connecting') for the dialog.
   Future<WatchRecord> pairAndConnect(String bleId,

@@ -46,6 +46,17 @@ final deviceRoomProvider = FutureProvider.autoDispose
   }
 });
 
+/// Node Wi-Fi state — `{state, wifi:{ssid,ip,…}}`; empty map when the
+/// node predates /api/v1/net.
+final deviceNetProvider = FutureProvider.autoDispose
+    .family<Map<String, dynamic>, String>((ref, deviceId) async {
+  try {
+    return await NodeClient.instance.netStatus(deviceId);
+  } catch (_) {
+    return <String, dynamic>{};
+  }
+});
+
 /// Event feed (CONTRACT §6): shared SSE subscription to
 /// `/v1/events/stream` — pushed, not polled. Each emission is a
 /// one-element batch (the same `List<Map>` shape the listener expects),
