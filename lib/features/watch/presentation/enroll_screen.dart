@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../context/application/context_providers.dart';
 import '../../context/domain/models.dart';
+import '../../earbuds/application/earbuds_providers.dart';
 import '../application/watch_providers.dart';
 import '../data/watch_link.dart';
 
@@ -30,7 +31,7 @@ class _EnrollScreenState extends ConsumerState<EnrollScreen> {
   _EnrollStep _step = _EnrollStep.discover;
   List<ScanResult> _found = const [];
   StreamSubscription<List<ScanResult>>? _sub;
-  ScanResult? _picked;
+  String? _pickedBleId;
   String? _error;
   bool _imuVerified = false;
   bool _creatingPerson = false;
@@ -64,19 +65,17 @@ class _EnrollScreenState extends ConsumerState<EnrollScreen> {
     super.dispose();
   }
 
-  Future<void> _pair(ScanResult r) async {
+  Future<void> _pairDevice(BluetoothDevice device, String name) async {
     setState(() {
-      _picked = r;
+      _pickedBleId = device.remoteId.str;
       _step = _EnrollStep.pair;
       _error = null;
     });
     try {
       final record = await ref
           .read(watchManagerProvider.notifier)
-          .pairAndConnect(r.device.remoteId.str,
-              name: r.advertisementData.advName.isNotEmpty
-                  ? r.advertisementData.advName
-                  : 'PineTime',);
+          .pairAndConnect(device.remoteId.str,
+              name: name.isNotEmpty ? name : 'PineTime',);
       // Register the logical entity + relationship in context.
       final repo = ref.read(contextRepoProvider);
       await repo.upsertEntity(ContextEntity(
@@ -97,10 +96,9 @@ class _EnrollScreenState extends ConsumerState<EnrollScreen> {
 
   Future<void> _associate(String personEntity) async {
     final repo = ref.read(contextRepoProvider);
-    final record = _picked;
-    if (record == null) return;
+    final bleId = _pickedBleId;
+    if (bleId == null) return;
     try {
-      final bleId = record.device.remoteId.str;
       final uuid = await ref.read(watchListProvider.future).then((l) =>
           l.where((w) => w.bleId == bleId).firstOrNull?.deviceUuid ?? bleId,);
       // person —wears→ wearable ; wearable —worn_by→ person
@@ -118,6 +116,40 @@ class _EnrollScreenState extends ConsumerState<EnrollScreen> {
     } catch (e) {
       setState(() => _error = 'association failed: $e');
     }
+  }
+
+  /// Watches the phone's own Bluetooth already owns — paired in Android
+  /// settings or connected at the system level. Enrolling one attaches
+  /// the app's GATT link in parallel; the OS keeps owning the bond.
+  Widget _systemWatches() {
+    return Consumer(builder: (context, ref, _) {
+      final sys = ref.watch(systemAccessoriesProvider).valueOrNull ??
+          const <SystemAccessory>[];
+      final watches = sys
+          .where((d) => d.kind == AccessoryKind.watch)
+          .toList();
+      if (watches.isEmpty) return const SizedBox.shrink();
+      return Column(children: [
+        const Padding(
+          padding: EdgeInsets.only(bottom: 4),
+          child: Text('Paired on this phone',
+              style: TextStyle(fontSize: 11, color: Colors.black45),),
+        ),
+        for (final d in watches)
+          ListTile(
+            dense: true,
+            leading: const Icon(Icons.watch),
+            title: Text(d.displayName),
+            subtitle: Text(
+                d.systemConnected ? 'connected' : 'paired',
+                style: const TextStyle(fontSize: 11),),
+            trailing: FilledButton.tonal(
+                onPressed: () => _pairDevice(d.device, d.displayName),
+                child: const Text('Enroll'),),
+          ),
+        const Divider(height: 8),
+      ],);
+    },);
   }
 
   void _startImuVerify(String bleId) {
@@ -151,6 +183,7 @@ class _EnrollScreenState extends ConsumerState<EnrollScreen> {
           0, 'Discover', _step.index >= 1,
           _step == _EnrollStep.discover
               ? Column(children: [
+                  _systemWatches(),
                   for (final r in _found)
                     ListTile(
                       dense: true,
@@ -161,13 +194,18 @@ class _EnrollScreenState extends ConsumerState<EnrollScreen> {
                       subtitle: Text('${r.rssi} dBm',
                           style: const TextStyle(fontSize: 11),),
                       trailing: FilledButton.tonal(
-                          onPressed: () => _pair(r),
+                          onPressed: () => _pairDevice(
+                              r.device, r.advertisementData.advName),
                           child: const Text('Enroll'),),
                     ),
                   if (_found.isEmpty)
                     const Padding(
                       padding: EdgeInsets.all(16),
-                      child: Text('Scanning for InfiniTime wearables…'),
+                      child: Text(
+                          'Scanning for InfiniTime wearables…\n'
+                          'Or pair the watch in Android Bluetooth '
+                          'settings — it shows above.',
+                          textAlign: TextAlign.center,),
                     ),
                 ],)
               : const SizedBox.shrink(),

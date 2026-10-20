@@ -77,20 +77,28 @@ class EarbudsStore {
       key: _key,
       value: json.encode(devices.map((d) => d.toJson()).toList()));
 
-  Future<void> upsert(EarbudsRecord record) async {
-    final all = (await load()).toList();
-    final i = all.indexWhere((d) => d.bleId == record.bleId);
-    if (i >= 0) {
-      all[i] = record;
-    } else {
-      all.add(record);
-    }
-    await save(all);
+  /// Serialized load-modify-save — adopt + deferred Brain pairing upsert
+  /// concurrently, and an interleaved read would silently drop a record.
+  Future _writeTail = Future.value();
+  Future<void> _mutate(Future<void> Function(List<EarbudsRecord>) fn) {
+    final next = _writeTail.then((_) async {
+      final all = (await load()).toList();
+      await fn(all);
+      await save(all);
+    });
+    _writeTail = next.catchError((_) {});
+    return next;
   }
 
-  Future<void> remove(String bleId) async {
-    final all = (await load()).toList()
-      ..removeWhere((d) => d.bleId == bleId);
-    await save(all);
-  }
+  Future<void> upsert(EarbudsRecord record) => _mutate((all) async {
+        final i = all.indexWhere((d) => d.bleId == record.bleId);
+        if (i >= 0) {
+          all[i] = record;
+        } else {
+          all.add(record);
+        }
+      });
+
+  Future<void> remove(String bleId) =>
+      _mutate((all) async => all.removeWhere((d) => d.bleId == bleId));
 }

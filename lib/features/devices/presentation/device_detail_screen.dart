@@ -186,6 +186,8 @@ class _OverviewTab extends ConsumerWidget {
           const SizedBox(height: 12),
           _NetworkCard(deviceId: deviceId),
           const SizedBox(height: 12),
+          _Esp32Card(deviceId: deviceId),
+          const SizedBox(height: 12),
           _ActivityCard(deviceId: deviceId),
           const SizedBox(height: 12),
           sensors.when(
@@ -655,6 +657,356 @@ class _WifiJoinSheetState extends ConsumerState<_WifiJoinSheet> {
         ref.invalidate(deviceNetProvider(widget.deviceId));
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Joining network…')),);
+      }
+    } on NodeRelayException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+}
+
+/// ESP32 (thoth_csi) boards on this node's USB — self-reported
+/// identity + Wi-Fi state from the serial line, plus the credential
+/// push leg of the provisioning chain (phone -> Brain -> node ->
+/// serial `wifi=`). Empty-state when no board reports yet.
+class _Esp32Card extends ConsumerWidget {
+  const _Esp32Card({required this.deviceId});
+  final String deviceId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final esp = ref.watch(deviceEsp32Provider(deviceId));
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: esp.when(
+          loading: () => const Center(
+              child: Padding(
+                  padding: EdgeInsets.all(8),
+                  child: CircularProgressIndicator(),),),
+          error: (_, __) => const SizedBox.shrink(),
+          data: (m) {
+            final boards = (m['boards'] as List? ?? const [])
+                .map((e) => Map<String, dynamic>.from(e as Map))
+                .toList();
+            if (boards.isEmpty) return const SizedBox.shrink();
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('ESP32 radios (${boards.length})',
+                    style: Theme.of(context).textTheme.titleMedium,),
+                const SizedBox(height: 8),
+                for (final b in boards) ...[
+                  _boardHeader(b),
+                  _boardStats(b),
+                  const SizedBox(height: 4),
+                ],
+                const SizedBox(height: 4),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    FilledButton.tonalIcon(
+                      icon: const Icon(Icons.tune, size: 18),
+                      label: const Text('Rate & options\u2026'),
+                      onPressed: () => _optsSheet(context, ref),
+                    ),
+                    FilledButton.tonalIcon(
+                      icon: const Icon(Icons.wifi_tethering, size: 18),
+                      label: const Text('Set Wi-Fi\u2026'),
+                      onPressed: () => _credSheet(context, ref),
+                    ),
+                  ],
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _boardHeader(Map<String, dynamic> b) {
+    final live = b['live'] is Map ? b['live'] as Map : null;
+    final ip = live?['ip'] ?? b['ip'];
+    return Padding(
+      padding: const EdgeInsets.only(top: 3),
+      child: Row(
+        children: [
+          Icon(
+            b['connected'] == true ? Icons.wifi : Icons.wifi_off,
+            size: 18,
+            color: b['connected'] == true
+                ? Colors.green
+                : Colors.redAccent,),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '${b['name'] ?? b['mac'] ?? b['serial_port'] ?? 'esp32'}'
+              '  \u00b7  ${b['role'] ?? 'recv'}',
+              style: const TextStyle(fontWeight: FontWeight.w500),),),
+          Text(
+            b['connected'] == true
+                ? '${b['ssid'] ?? ''} ($ip)'
+                : (b['ssid'] != null
+                    ? '${b['ssid']} — not connected'
+                    : 'not connected'),
+            style: TextStyle(
+              fontSize: 12,
+              color: b['connected'] == true
+                  ? Colors.black87
+                  : Colors.redAccent,),),
+        ],
+      ),
+    );
+  }
+
+  /// Per-board counters — serial-side health fields plus the board's
+  /// own dashboard values when the daemon merged them (`live`).
+  Widget _boardStats(Map<String, dynamic> b) {
+    final live = b['live'] is Map
+        ? Map<String, dynamic>.from(b['live'] as Map)
+        : null;
+    final num? csi = live?['csi_frames'] is num
+        ? live!['csi_frames'] as num
+        : b['csi_enqueued'] is num ? b['csi_enqueued'] as num : null;
+    final bits = <String>[
+      if (live?['ping_hz'] != null) 'ping ${live!['ping_hz']} Hz',
+      if (live?['ping_sent'] != null) 'sent ${live!['ping_sent']}',
+      if (csi != null) 'csi $csi',
+      if (live?['channel'] != null) 'ch ${live!['channel']}',
+      if (live?['ap_rssi'] != null) 'rssi ${live!['ap_rssi']}',
+      if (live?['sweep'] != null)
+        'sweep ${live!['sweep'] == true ? 'on' : 'off'}',
+      if (b['queue_depth'] != null) 'q ${b['queue_depth']}',
+      if (b['output_dropped'] != null) 'dropped ${b['output_dropped']}',
+      if (live?['free_heap'] != null)
+        'heap ${((live!['free_heap'] as num) / 1024).round()}k',
+      if (live?['uptime_s'] != null)
+        'up ${((live!['uptime_s'] as num) / 60).round()}m',
+    ];
+    if (bits.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(left: 26, top: 2),
+      child: Text(
+        bits.join('  ·  '),
+        style: const TextStyle(fontSize: 11, color: Colors.black54),),
+    );
+  }
+
+  void _credSheet(BuildContext context, WidgetRef ref) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => _Esp32CredSheet(deviceId: deviceId),
+    );
+  }
+
+  void _optsSheet(BuildContext context, WidgetRef ref) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => _Esp32OptsSheet(deviceId: deviceId),
+    );
+  }
+}
+
+/// Bottom sheet: runtime options for the attached ESP32(s) — CSI
+/// stimulus rate (`ping=<hz>`, 0–200) and channel sweep — relayed to
+/// the boards' serial consoles. Live-applied, persisted in board NVS.
+class _Esp32OptsSheet extends ConsumerStatefulWidget {
+  const _Esp32OptsSheet({required this.deviceId});
+  final String deviceId;
+
+  @override
+  ConsumerState<_Esp32OptsSheet> createState() => _Esp32OptsSheetState();
+}
+
+class _Esp32OptsSheetState extends ConsumerState<_Esp32OptsSheet> {
+  double _hz = 200;
+  bool _sweep = false;
+  bool _sending = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 16, right: 16, top: 16,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 16,),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('ESP32 options',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),),
+          const SizedBox(height: 4),
+          const Text(
+            'CSI stimulus rate — the board elicits downlink traffic '
+            'from the router at this rate; each reply yields a CSI '
+            'frame. Actual capture is UART-bound (~40–60 fps).',
+            style: TextStyle(fontSize: 12, color: Colors.black54),),
+          Row(
+            children: [
+              const Text('ping', style: TextStyle(fontSize: 13)),
+              Expanded(
+                child: Slider(
+                  value: _hz, min: 0, max: 200, divisions: 40,
+                  label: '${_hz.round()} Hz',
+                  onChanged: (v) => setState(() => _hz = v),),),
+              SizedBox(
+                width: 64,
+                child: Text('${_hz.round()} Hz',
+                    textAlign: TextAlign.end,
+                    style: const TextStyle(fontFamily: 'monospace'),),),
+            ],
+          ),
+          SwitchListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Channel sweep',
+                style: TextStyle(fontSize: 14),),
+            subtitle: const Text('hop the sender across channels',
+                style: TextStyle(fontSize: 11),),
+            value: _sweep,
+            onChanged: (v) => setState(() => _sweep = v),),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: _sending ? null
+                    : () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),),
+              const SizedBox(width: 8),
+              FilledButton(
+                onPressed: _sending ? null : _apply,
+                child: Text(_sending ? 'Applying\u2026' : 'Apply'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _apply() async {
+    if (_sending) return;
+    setState(() => _sending = true);
+    try {
+      await NodeClient.instance
+          .esp32Cmd(widget.deviceId, 'ping=${_hz.round()}');
+      await NodeClient.instance
+          .esp32Cmd(widget.deviceId, 'sweep=${_sweep ? 1 : 0}');
+      if (mounted) {
+        Navigator.of(context).pop();
+        Future.delayed(const Duration(seconds: 2),
+            () => ref.invalidate(deviceEsp32Provider(widget.deviceId)));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('ESP32 options applied'),),);
+      }
+    } on NodeRelayException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+}
+
+/// Bottom sheet: SSID + PSK -> POST /api/v1/esp32/net -> the node
+/// writes `wifi=<ssid>,<psk>` to every attached ESP32 console; each
+/// board persists, reboots and joins the AP (its serial SELF_DATA then
+/// reports the new link state back up).
+class _Esp32CredSheet extends ConsumerStatefulWidget {
+  const _Esp32CredSheet({required this.deviceId});
+  final String deviceId;
+
+  @override
+  ConsumerState<_Esp32CredSheet> createState() => _Esp32CredSheetState();
+}
+
+class _Esp32CredSheetState extends ConsumerState<_Esp32CredSheet> {
+  final _ssid = TextEditingController();
+  final _psk = TextEditingController();
+  bool _sending = false;
+
+  @override
+  void dispose() {
+    _ssid.dispose();
+    _psk.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 16, right: 16, top: 16,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 16,),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('ESP32 Wi-Fi credentials',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),),
+          const SizedBox(height: 4),
+          const Text(
+            'Written to the board\'s serial console — it persists, '
+            'reboots, joins the AP and starts producing CSI off the '
+            'router.',
+            style: TextStyle(fontSize: 12, color: Colors.black54),),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _ssid,
+            decoration: const InputDecoration(labelText: 'SSID'),
+            textInputAction: TextInputAction.next,),
+          TextField(
+            controller: _psk,
+            decoration: const InputDecoration(
+                labelText: 'Password (empty for open)'),
+            obscureText: true,
+            onSubmitted: (_) => _send(),),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: _sending ? null
+                    : () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),),
+              const SizedBox(width: 8),
+              FilledButton(
+                onPressed: _sending ? null : _send,
+                child: Text(_sending ? 'Sending\u2026' : 'Send to board'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _send() async {
+    final ssid = _ssid.text.trim();
+    if (ssid.isEmpty || _sending) return;
+    setState(() => _sending = true);
+    try {
+      await NodeClient.instance.esp32NetConnect(
+          widget.deviceId, ssid, psk: _psk.text);
+      if (mounted) {
+        Navigator.of(context).pop();
+        // The board reboots then reports ssid/ip on its next SELF_DATA —
+        // refresh in a moment so the card picks it up.
+        Future.delayed(const Duration(seconds: 6),
+            () => ref.invalidate(deviceEsp32Provider(widget.deviceId)));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Credentials sent — board is rebooting'
+                ' into the network\u2026'),),);
       }
     } on NodeRelayException catch (e) {
       if (mounted) {

@@ -6,9 +6,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/api/node_client.dart';
 import '../../devices/application/devices_provider.dart';
+import '../../watch/data/watch_link.dart' show WatchLink;
 import '../data/earbuds_link.dart';
 import '../data/earbuds_relay.dart';
 import '../data/earbuds_store.dart';
+import '../data/recording_service.dart';
 import '../domain/earbuds_gatt.dart';
 
 /// Paired buds persisted in secure storage.
@@ -37,6 +39,9 @@ final earbudsManagerProvider =
 
 class EarbudsManager extends Notifier<Map<String, EarbudsRelay>> {
   Timer? _rssiTimer;
+  /// Thoth-action forwarding — one sub per connected link; a bud gesture
+  /// mapped to 0x10 toggles the phone's recording session, 0x11 ends it.
+  final Map<String, StreamSubscription<BudsTelemetry>> _actionSubs = {};
 
   @override
   Map<String, EarbudsRelay> build() {
@@ -44,12 +49,16 @@ class EarbudsManager extends Notifier<Map<String, EarbudsRelay>> {
       for (final relay in state.values) {
         relay.dispose();
       }
+      for (final sub in _actionSubs.values) {
+        sub.cancel();
+      }
       _rssiTimer?.cancel();
     });
     ref.listen(earbudsListProvider, (_, next) {
       final records = next.value ?? const <EarbudsRecord>[];
       for (final key in state.keys.toList()) {
         if (!records.any((r) => r.bleId == key)) {
+          _actionSubs.remove(key)?.cancel();
           state[key]?.dispose();
           state = {...state}..remove(key);
         }
@@ -105,6 +114,21 @@ class EarbudsManager extends Notifier<Map<String, EarbudsRelay>> {
     final relay = EarbudsRelay(record);
     await relay.start(link);
     state = {...state, record.bleId: relay};
+    // thoth actions → phone-side controls: 0x10 voice toggle (record),
+    // 0x11 voice end. The bud emits these as EVENTs once a gesture is
+    // mapped to them (Gestures tab).
+    _actionSubs[record.bleId]?.cancel();
+    _actionSubs[record.bleId] = link.telemetry.listen((t) {
+      final ev = t.event;
+      if (ev == null || !ev.thothAction) return;
+      if (ev.actionCode == 0x10) {
+        unawaited(RecordingService.instance
+            .toggle(deviceUuid: record.deviceUuid));
+      } else if (ev.actionCode == 0x11 &&
+          RecordingService.instance.recording) {
+        unawaited(RecordingService.instance.stop());
+      }
+    });
     unawaited(link.connect());
     unawaited(_enrollOnNodes(record));
     await _waitConnected(relay);
@@ -191,6 +215,7 @@ class EarbudsManager extends Notifier<Map<String, EarbudsRelay>> {
   }
 
   Future<void> disconnect(String bleId) async {
+    await _actionSubs.remove(bleId)?.cancel();
     await state[bleId]?.dispose();
     state = {...state}..remove(bleId);
   }
@@ -224,12 +249,120 @@ final accessoryScanProvider =
   }
 });
 
-bool _looksLikeWatch(ScanResult r) {
-  final name = (r.advertisementData.advName.isNotEmpty
-          ? r.advertisementData.advName
-          : r.device.platformName)
-      .toLowerCase();
-  return name.contains('infinitime') || name.contains('pinetime');
+bool _looksLikeWatch(ScanResult r) =>
+    classifyAccessoryName(r.advertisementData.advName.isNotEmpty
+            ? r.advertisementData.advName
+            : r.device.platformName) ==
+        AccessoryKind.watch;
+
+/// Classify a wearable by advertised/bonded name. Shared by the BLE scan
+/// filter and the system-device list — keep name patterns aligned with
+/// `EarbudsGatt.looksLikeBuds` and `WatchLink.looksLikeWatch`.
+AccessoryKind? classifyAccessoryName(String? name) {
+  final n = (name ?? '').toLowerCase();
+  if (n.contains('pinebuds') ||
+      n.contains('bes_ble') ||
+      n.contains('thothbuds') ||
+      n == 'buds') {
+    return AccessoryKind.earbuds;
+  }
+  if (n.contains('infinitime') ||
+      n.contains('pinetime') ||
+      n.contains('pinewatch')) {
+    return AccessoryKind.watch;
+  }
+  return null;
+}
+
+/// A wearable the phone's own Bluetooth stack already knows — paired in
+/// Android Bluetooth settings or connected at the system level (any
+/// profile, e.g. PineBuds A2DP audio). Adopting one attaches the app's
+/// GATT telemetry link in parallel; the system keeps owning pairing.
+class SystemAccessory {
+  const SystemAccessory({
+    required this.device,
+    required this.kind,
+    required this.bonded,
+    required this.systemConnected,
+  });
+
+  final BluetoothDevice device;
+  final AccessoryKind? kind; // null = bonded device with no name match
+  final bool bonded;
+  final bool systemConnected;
+
+  String get bleId => device.remoteId.str;
+  String get displayName {
+    final n = device.platformName;
+    if (n.isNotEmpty) return n;
+    return kind == AccessoryKind.earbuds
+        ? 'PineBuds'
+        : kind == AccessoryKind.watch
+            ? 'PineTime'
+            : bleId;
+  }
+}
+
+/// System-level devices refreshed while watched — polled (binder calls,
+/// cheap) so buds connecting/disconnecting in Android settings appear
+/// and disappear live in the add sheet. The app-side GATT link state is
+/// separate: a bonded PineBuds streaming audio counts as
+/// system-connected even before the app attaches its telemetry link.
+final systemAccessoriesProvider =
+    StreamProvider.autoDispose<List<SystemAccessory>>((ref) async* {
+  while (true) {
+    yield await _listSystemAccessories();
+    await Future<void>.delayed(const Duration(seconds: 3));
+  }
+});
+
+Future<List<SystemAccessory>> _listSystemAccessories() async {
+  try {
+    await WatchLink.ensurePermissions();
+  } catch (_) {}
+  final out = <String, SystemAccessory>{};
+  // Bonded (paired in system settings) — catches PineBuds on A2DP even
+  // when they hold no LE link at all.
+  try {
+    for (final d in await FlutterBluePlus.bondedDevices) {
+      out[d.remoteId.str] = SystemAccessory(
+        device: d,
+        kind: classifyAccessoryName(d.platformName),
+        bonded: true,
+        systemConnected: d.isConnected,
+      );
+    }
+  } catch (e) {
+    debugPrint('[accessory] bondedDevices: $e');
+  }
+  // Connected at the system level by any app (GATT-visible).
+  try {
+    for (final d
+        in await FlutterBluePlus.systemDevices([Guid('1800')])) {
+      final id = d.remoteId.str;
+      final prev = out[id];
+      out[id] = SystemAccessory(
+        device: d,
+        kind: classifyAccessoryName(d.platformName) ?? prev?.kind,
+        bonded: prev?.bonded ?? false,
+        systemConnected: true,
+      );
+    }
+  } catch (e) {
+    debugPrint('[accessory] systemDevices: $e');
+  }
+  final list = out.values.toList();
+  // Wearables first, other paired devices after; connected before idle.
+  list.sort((a, b) {
+    final aw = a.kind != null ? 0 : 1;
+    final bw = b.kind != null ? 0 : 1;
+    if (aw != bw) return aw - bw;
+    final ac = a.systemConnected ? 0 : 1;
+    final bc = b.systemConnected ? 0 : 1;
+    if (ac != bc) return ac - bc;
+    return a.displayName.compareTo(b.displayName);
+  });
+  return list;
 }
 
 /// Latest telemetry per buds device.

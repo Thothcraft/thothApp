@@ -72,6 +72,8 @@ dependencies:
   carousel_slider: ^5.0.0
   smooth_page_indicator: ^1.2.0+3
   archive: ^4.3.0
+  record: ^7.1.2
+  path_provider: ^2.1.6
 
 # flutter_plugin_android_lifecycle ≥2.0.26 ships AAR metadata compiled
 # against API 36, failing file_picker's checkAarMetadata at compileSdk <36.
@@ -108,6 +110,9 @@ flutter:
     - assets/videos/getting_started.mp4
     - assets/videos/first.mp4
     - assets/videos/sensors.mp4
+
+    # PineTime DFU image (thoth-fork InfiniTime — stamped motion + scan)
+    - assets/firmware/pinetime-mcuboot-app-dfu-1.16.99.zip
 
   # Fonts (if custom fonts are needed)
   # fonts:

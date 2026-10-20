@@ -283,5 +283,54 @@ class BleRelation {
       componentId: componentId,);
 }
 
+/// One GPS fix from ``location.geo.v1`` evidence.
+class GeoFix {
+  const GeoFix(this.lat, this.lon, this.ts, {this.accM, this.speedMps});
+  final double lat, lon, ts;
+  final double? accM, speedMps;
+}
+
+/// Recent GPS breadcrumbs per GPS-capable source — ``location.geo.v1``
+/// evidence grouped by device uuid (falling back to source id). The fleet
+/// map draws one polyline + head pin per entry.
+final geoTracesProvider =
+    StreamProvider.autoDispose<Map<String, List<GeoFix>>>((ref) async* {
+  final repo = ref.watch(contextRepoProvider);
+  for (;;) {
+    final since =
+        (DateTime.now().millisecondsSinceEpoch - 12 * 3600 * 1000) / 1000.0;
+    Map<String, List<GeoFix>> out = const {};
+    try {
+      final rows = await repo.evidence(
+        key: ContextKeys.geoEvidence,
+        since: since,
+        limit: 2000,
+      );
+      final grouped = <String, List<GeoFix>>{};
+      for (final e in rows) {
+        final v = e.value is Map ? Map<String, dynamic>.from(e.value) : null;
+        if (v == null) continue;
+        final lat = (v['lat'] as num?)?.toDouble();
+        final lon = (v['lon'] as num?)?.toDouble();
+        if (lat == null || lon == null || !lat.isFinite || !lon.isFinite) {
+          continue;
+        }
+        final id = e.deviceId ?? e.sourceId ?? 'unknown';
+        grouped
+            .putIfAbsent(id, () => [])
+            .add(GeoFix(lat, lon, e.timestamp ?? 0,
+                accM: (v['acc_m'] as num?)?.toDouble(),
+                speedMps: (v['speed_mps'] as num?)?.toDouble()));
+      }
+      for (final l in grouped.values) {
+        l.sort((a, b) => a.ts.compareTo(b.ts));
+      }
+      out = grouped;
+    } catch (_) {/* evidence may be unavailable — keep last frame */}
+    yield out;
+    await Future<void>.delayed(_pollCadence);
+  }
+});
+
 /// Owned devices (for claim/space pickers in setup).
 final deviceListProvider = devicesProvider;

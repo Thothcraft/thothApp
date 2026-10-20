@@ -19,9 +19,12 @@ import '../features/calibrate/presentation/calibrate_screen.dart';
 import '../features/chat/presentation/chat_screen.dart';
 import '../features/context/presentation/context_home_screen.dart';
 import '../features/context/presentation/entity_detail_screen.dart';
+import '../features/context/presentation/fleet_map.dart';
 import '../features/context/presentation/infer_screen.dart';
 import '../features/context/presentation/relations_screen.dart';
 import '../features/context/presentation/space_detail_screen.dart';
+import '../features/timeline/presentation/timeline_screen.dart';
+import '../features/earbuds/presentation/earbuds_detail_screen.dart';
 import '../features/watch/presentation/enroll_screen.dart';
 import '../features/watch/presentation/watch_screen.dart';
 import '../features/watch/presentation/pinetime_detail_screen.dart';
@@ -128,11 +131,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               child: HomeScreen(),
             ),
           ),
-          // Map tab — the BLE spatial map IS the context surface.
+          // Map tab — world fleet map that zooms into the floor plan.
           GoRoute(
             path: AppRoutes.context,
             pageBuilder: (context, state) => const NoTransitionPage(
-              child: RelationsScreen(),
+              child: FleetMapScreen(),
             ),
           ),
           // Chat tab — assistant lives inside the shell so the nav bar
@@ -209,8 +212,21 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         ),
       ),
       GoRoute(
+        path: '/context/timeline',
+        builder: (context, state) => Scaffold(
+          appBar: AppBar(title: const Text('Timeline')),
+          body: const TimelineScreen(),
+        ),
+      ),
+      GoRoute(
         path: '/watch/:bleId',
         builder: (context, state) => PinetimeDetailScreen(
+          bleId: Uri.decodeComponent(state.pathParameters['bleId']!),
+        ),
+      ),
+      GoRoute(
+        path: '/earbuds/:bleId',
+        builder: (context, state) => EarbudsDetailScreen(
           bleId: Uri.decodeComponent(state.pathParameters['bleId']!),
         ),
       ),

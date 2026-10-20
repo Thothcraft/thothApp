@@ -12,6 +12,8 @@
 
     <!-- Setup QR scanning (node commissioning). -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Bud long-press → phone mic capture -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <!-- Phone GPS trace (movement map around the watch). -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />

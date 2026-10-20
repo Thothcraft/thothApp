@@ -53,7 +53,9 @@ class TraceService extends ChangeNotifier {
   final List<TracePoint> trace = [];
   final _traceOut = StreamController<TracePoint>.broadcast();
 
-  WatchRelay? _relay;
+  /// Attached watch relays keyed by BLE id — multiple watches stay live
+  /// simultaneously; each gets its own RSSI smoothing and GPS feed.
+  final Map<String, WatchRelay> _relays = {};
   Timer? _rssiTimer;
   Timer? _diagTimer;
   StreamSubscription<Position>? _posSub;
@@ -63,32 +65,38 @@ class TraceService extends ChangeNotifier {
   bool _gpsOn = true;
   bool _permitted = false;
 
-  int? _lastRssi;
-  double? _rssiSmooth;
+  /// Per-watch link RSSI (raw last read + EMA-smoothed).
+  final Map<String, int> _lastRssiBy = {};
+  final Map<String, double> _rssiSmoothBy = {};
   Position? _lastFix;
   TracePoint? _lastKept;
   double _distanceM = 0;
   bool _batteryOptAsked = false;
 
   Stream<TracePoint> get points => _traceOut.stream;
-  bool get relayAttached => _relay != null;
+  bool get relayAttached => _relays.isNotEmpty;
   bool get foregroundServiceRunning => _fgsRunning;
-  int? get lastRssi => _lastRssi;
-  double? get rssiSmooth => _rssiSmooth;
+  /// Strongest link RSSI across attached watches (closer = less negative).
+  int? get lastRssi => _lastRssiBy.values.isEmpty
+      ? null
+      : _lastRssiBy.values.reduce((a, b) => a > b ? a : b);
+  double? get rssiSmooth => _rssiSmoothBy.values.isEmpty
+      ? null
+      : _rssiSmoothBy.values.reduce((a, b) => a > b ? a : b);
   Position? get lastFix => _lastFix;
   double get distanceM => _distanceM;
   DateTime? get firstPointAt => trace.isEmpty ? null : trace.first.at;
 
   /// Normalized signal strength 0–100 (maps −90…−30 dBm).
   int? get signalPct {
-    final r = _rssiSmooth;
+    final r = rssiSmooth;
     if (r == null) return null;
     return (((r + 90) / 60) * 100).round().clamp(0, 100);
   }
 
   /// Human proximity band from smoothed RSSI.
   String? get proximityBand {
-    final r = _rssiSmooth;
+    final r = rssiSmooth;
     if (r == null) return null;
     if (r >= -55) return 'very close';
     if (r >= -70) return 'nearby';
@@ -97,9 +105,9 @@ class TraceService extends ChangeNotifier {
   }
 
   /// Free-space path-loss estimate on the smoothed value.
-  double? get proximityM => _rssiSmooth == null
+  double? get proximityM => rssiSmooth == null
       ? null
-      : math.pow(10.0, (-59 - _rssiSmooth!) / 20.0).toDouble();
+      : math.pow(10.0, (-59 - rssiSmooth!) / 20.0).toDouble();
 
   /// Attach to a live watch relay. Order matters on Samsung: request the
   /// notification + location permissions *first*, then start the
@@ -107,7 +115,7 @@ class TraceService extends ChangeNotifier {
   /// the FGS on API 33+.
   Future<void> attach(WatchRelay relay,
       {bool backgroundRelay = true, bool gpsTrace = true,}) async {
-    _relay = relay;
+    _relays[relay.record.bleId] = relay;
     _backgroundOn = backgroundRelay;
     _gpsOn = gpsTrace;
     notifyListeners();
@@ -123,16 +131,31 @@ class TraceService extends ChangeNotifier {
     // Diagnostics heartbeat — visible in `adb logcat | grep trace` while
     // the screen is off: proves BLE rx, upload, and FGS state.
     _diagTimer ??= Timer.periodic(const Duration(seconds: 15), (_) {
-      final r = _relay;
-      debugPrint('[trace] fgs=$_fgsRunning rssi=$_lastRssi '
-          'motionRx=${r?.link?.motionRx} '
-          'sent=${r?.chunksSent} failed=${r?.chunksFailed} '
-          'buf=${r?.bufferedSamples} pts=${trace.length}');
+      for (final e in _relays.entries) {
+        final r = e.value;
+        debugPrint('[trace] ${e.key} fgs=$_fgsRunning '
+            'rssi=${_lastRssiBy[e.key]} motionRx=${r.link?.motionRx} '
+            'sent=${r.chunksSent} failed=${r.chunksFailed} '
+            'buf=${r.bufferedSamples} pts=${trace.length}');
+      }
     });
   }
 
+  /// Detach one watch — with others still attached the timers, GPS
+  /// stream and foreground service all keep running; the full teardown
+  /// only fires when the last relay goes away.
+  Future<void> detachRelay(String bleId) async {
+    _relays.remove(bleId);
+    _lastRssiBy.remove(bleId);
+    _rssiSmoothBy.remove(bleId);
+    if (_relays.isEmpty) await detach();
+    notifyListeners();
+  }
+
   Future<void> detach() async {
-    _relay = null;
+    _relays.clear();
+    _lastRssiBy.clear();
+    _rssiSmoothBy.clear();
     _rssiTimer?.cancel();
     _rssiTimer = null;
     _diagTimer?.cancel();
@@ -154,7 +177,7 @@ class TraceService extends ChangeNotifier {
   /// a watch stays connected.
   Future<void> setBackgroundRelay(bool on) async {
     _backgroundOn = on;
-    if (on && _relay != null) {
+    if (on && _relays.isNotEmpty) {
       await _ensureForegroundService();
     } else if (!on && _fgsRunning) {
       try {
@@ -170,7 +193,7 @@ class TraceService extends ChangeNotifier {
     if (!on) {
       await _posSub?.cancel();
       _posSub = null;
-    } else if (_relay != null) {
+    } else if (_relays.isNotEmpty) {
       _startPositionStream();
     }
     notifyListeners();
@@ -194,16 +217,18 @@ class TraceService extends ChangeNotifier {
   }
 
   Future<void> _pollRssi() async {
-    final relay = _relay;
-    final link = relay?.link;
-    if (link == null) return;
-    final rssi = await link.readRssi();
-    if (rssi == null || relay == null) return;
-    _lastRssi = rssi;
-    _rssiSmooth = _rssiSmooth == null
-        ? rssi.toDouble()
-        : _emaAlpha * rssi + (1 - _emaAlpha) * _rssiSmooth!;
-    relay.addLocal(WatchTelemetry(rssi: _rssiSmooth!.round()));
+    for (final e in _relays.entries) {
+      final link = e.value.link;
+      if (link == null) continue;
+      final rssi = await link.readRssi();
+      if (rssi == null) continue;
+      _lastRssiBy[e.key] = rssi;
+      final prev = _rssiSmoothBy[e.key];
+      final smooth =
+          prev == null ? rssi.toDouble() : _emaAlpha * rssi + (1 - _emaAlpha) * prev;
+      _rssiSmoothBy[e.key] = smooth;
+      e.value.addLocal(WatchTelemetry(rssi: smooth.round()));
+    }
     notifyListeners();
   }
 
@@ -257,7 +282,7 @@ class TraceService extends ChangeNotifier {
       lon: p.longitude,
       accuracyM: p.accuracy,
       speedMps: p.speed >= 0 ? p.speed : null,
-      rssi: _rssiSmooth?.round() ?? _lastRssi,
+      rssi: rssiSmooth?.round() ?? lastRssi,
     );
     _lastKept = point;
     trace.add(point);
@@ -266,14 +291,17 @@ class TraceService extends ChangeNotifier {
     }
     _traceOut.add(point);
 
-    // Feed the fix into the watch's Brain stream (pinetime-gps).
-    _relay?.addLocal(WatchTelemetry(
-      lat: p.latitude,
-      lon: p.longitude,
-      accuracyM: p.accuracy,
-      speedMps: p.speed >= 0 ? p.speed : null,
-      rssi: _rssiSmooth?.round(),
-    ),);
+    // Feed the fix into every attached watch's Brain stream
+    // (pinetime-gps) — each carries its own smoothed RSSI.
+    for (final e in _relays.entries) {
+      e.value.addLocal(WatchTelemetry(
+        lat: p.latitude,
+        lon: p.longitude,
+        accuracyM: p.accuracy,
+        speedMps: p.speed >= 0 ? p.speed : null,
+        rssi: _rssiSmoothBy[e.key]?.round() ?? _lastRssiBy[e.key],
+      ),);
+    }
     notifyListeners();
   }
 

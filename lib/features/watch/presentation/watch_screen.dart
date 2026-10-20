@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/api/brain_client.dart';
 import '../../earbuds/application/earbuds_providers.dart';
 import '../../earbuds/data/earbuds_relay.dart';
 import '../../earbuds/data/earbuds_store.dart';
@@ -89,8 +90,9 @@ class _EmptyAccessories extends StatelessWidget {
           const SizedBox(height: 8),
           const Center(
             child: Text(
-              'Pair a PineTime watch or PineBuds Pro.\n'
-              'The app keeps them connected in the background.',
+              'Pair a PineTime or PineBuds Pro in Android Bluetooth\n'
+              'settings, then add it here — the app shows its stats,\n'
+              'sensors and commands, and streams its data.',
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.black54),
             ),
@@ -99,7 +101,7 @@ class _EmptyAccessories extends StatelessWidget {
           FilledButton.icon(
             onPressed: onScan,
             icon: const Icon(Icons.bluetooth_searching),
-            label: const Text('Scan for accessories'),
+            label: const Text('Add accessory'),
           ),
         ],
       );
@@ -182,15 +184,25 @@ class _WatchCard extends ConsumerWidget {
                         .disconnect(record.bleId),
                   ),
                 const SizedBox(width: 12),
-                if (relay?.lastError != null)
+                if (!connected && (relay?.link?.lastError ?? relay?.lastError) != null)
                   Expanded(
-                    child: Text(relay!.lastError!,
+                    child: Text(
+                        relay!.link?.lastError ?? relay!.lastError!,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         textAlign: TextAlign.end,
                         style: const TextStyle(
                             color: Colors.redAccent, fontSize: 11,),),
                   ),
+                IconButton(
+                  icon: const Icon(Icons.edit_outlined, size: 20),
+                  tooltip: 'Rename',
+                  onPressed: () => _renameAccessory(context, ref,
+                      bleId: record.bleId,
+                      deviceUuid: record.deviceUuid,
+                      current: record.name,
+                      kind: AccessoryKind.watch,),
+                ),
                 IconButton(
                   icon: const Icon(Icons.delete_outline),
                   tooltip: 'Unpair',
@@ -256,6 +268,8 @@ class _EarbudsCard extends ConsumerWidget {
                 : Text(relay == null ? 'not connected' : 'connecting…',
                     style:
                         const TextStyle(fontSize: 12, color: Colors.grey),),
+            onTap: () =>
+                context.push('/earbuds/${Uri.encodeComponent(record.bleId)}'),
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
@@ -287,15 +301,25 @@ class _EarbudsCard extends ConsumerWidget {
                         .disconnect(record.bleId),
                   ),
                 const SizedBox(width: 12),
-                if (relay?.lastError != null)
+                if (!connected && (relay?.link?.lastError ?? relay?.lastError) != null)
                   Expanded(
-                    child: Text(relay!.lastError!,
+                    child: Text(
+                        relay!.link?.lastError ?? relay!.lastError!,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         textAlign: TextAlign.end,
                         style: const TextStyle(
                             color: Colors.redAccent, fontSize: 11,),),
                   ),
+                IconButton(
+                  icon: const Icon(Icons.edit_outlined, size: 20),
+                  tooltip: 'Rename',
+                  onPressed: () => _renameAccessory(context, ref,
+                      bleId: record.bleId,
+                      deviceUuid: record.deviceUuid,
+                      current: record.name,
+                      kind: AccessoryKind.earbuds,),
+                ),
                 IconButton(
                   icon: const Icon(Icons.delete_outline),
                   tooltip: 'Unpair',
@@ -327,89 +351,319 @@ Widget _chip(IconData icon, String text) => Row(
       ],
     );
 
-/// Bottom sheet: unified BLE scan — watches and buds in one list.
-/// Tap adopts instantly (non-blocking): the card appears and the
-/// connection lands in the background — no modal spinner that can hang.
+/// Bottom sheet: add an accessory. Two sources:
+///   • devices the phone's own Bluetooth already owns — paired in
+///     Android settings or connected at the system level (PineBuds on
+///     A2DP land here even with no LE link up). One tap adopts them.
+///   • nearby BLE advertisers (a watch that was never paired with the
+///     phone still shows up here via its InfiniTime advertisement).
+/// Adopt is non-blocking in both cases: the card appears and the GATT
+/// link lands in the background — the OS keeps owning the bond.
 class AccessoryScanSheet extends ConsumerWidget {
   const AccessoryScanSheet({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final sys = ref.watch(systemAccessoriesProvider);
     final results = ref.watch(accessoryScanProvider);
+    final adopted = {
+      ...?ref.watch(watchListProvider).valueOrNull?.map((w) => w.bleId),
+      ...?ref.watch(earbudsListProvider).valueOrNull?.map((b) => b.bleId),
+    };
     return DraggableScrollableSheet(
       expand: false,
       initialChildSize: 0.6,
-      builder: (context, scroll) => Column(
+      builder: (context, scroll) => ListView(
+        controller: scroll,
         children: [
           const Padding(
-            padding: EdgeInsets.all(16),
-            child: Text('Nearby accessories',
+            padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
+            child: Text('Add accessory',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),),
           ),
-          Expanded(
-            child: results.when(
-              loading: () =>
-                  const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Center(child: Text('Scan failed: $e')),
-              data: (list) {
-                if (list.isEmpty) {
-                  return const Center(
-                      child: Text(
-                          'Searching…\nKeep the accessory awake and in range.',
-                          textAlign: TextAlign.center,),);
-                }
-                return ListView.builder(
-                  controller: scroll,
-                  itemCount: list.length,
-                  itemBuilder: (context, i) {
-                    final hit = list[i];
-                    final r = hit.result;
-                    final name = r.advertisementData.advName.isNotEmpty
-                        ? r.advertisementData.advName
-                        : r.device.platformName;
-                    return ListTile(
-                      leading: Icon(hit.kind == AccessoryKind.earbuds
-                          ? Icons.earbuds
-                          : Icons.watch),
-                      title: Text(name.isEmpty
-                          ? (hit.kind == AccessoryKind.earbuds
-                              ? 'PineBuds'
-                              : 'PineTime')
-                          : name),
-                      subtitle: Text(
-                          '${r.device.remoteId.str} • ${r.rssi} dBm',),
-                      trailing: const Icon(Icons.add_link),
-                      onTap: () => _adopt(context, ref, hit),
-                    );
-                  },
-                );
-              },
+          _sectionLabel('Connected to this phone'),
+          sys.when(
+            loading: () => const Padding(
+              padding: EdgeInsets.all(16),
+              child: Center(child: CircularProgressIndicator()),
             ),
+            error: (e, _) => Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Text('Bluetooth unavailable: $e'),
+            ),
+            data: (devices) {
+              if (devices.isEmpty) {
+                return const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 4, 16, 8),
+                  child: Text(
+                    'Nothing paired yet — pair your PineBuds or PineTime '
+                    'in Android Bluetooth settings and it appears here.',
+                    style: TextStyle(color: Colors.black54, fontSize: 12),
+                  ),
+                );
+              }
+              return Column(children: [
+                for (final d in devices)
+                  _systemTile(context, ref, d, adopted.contains(d.bleId)),
+              ]);
+            },
+          ),
+          const Divider(height: 24),
+          _sectionLabel('Nearby (advertising)'),
+          results.when(
+            loading: () => const Padding(
+              padding: EdgeInsets.all(16),
+              child: Center(child: CircularProgressIndicator()),
+            ),
+            error: (e, _) => Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Text('Scan failed: $e'),
+            ),
+            data: (list) {
+              final unseen =
+                  list.where((h) => !adopted.contains(h.result.device.remoteId.str)).toList();
+              if (unseen.isEmpty) {
+                return const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 4, 16, 16),
+                  child: Text(
+                    'Searching… keep the accessory awake and in range.',
+                    style: TextStyle(color: Colors.black54, fontSize: 12),
+                  ),
+                );
+              }
+              return Column(children: [
+                for (final hit in unseen) _scanTile(context, ref, hit),
+              ]);
+            },
+          ),
+          const SizedBox(height: 24),
+        ],
+      ),
+    );
+  }
+
+  Widget _sectionLabel(String text) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+        child: Text(text.toUpperCase(),
+            style: const TextStyle(
+                fontSize: 11,
+                letterSpacing: 0.6,
+                color: Colors.black45,
+                fontWeight: FontWeight.w600,),),
+      );
+
+  Widget _systemTile(BuildContext context, WidgetRef ref,
+      SystemAccessory d, bool adopted) {
+    return ListTile(
+      leading: Icon(d.kind == AccessoryKind.earbuds
+          ? Icons.earbuds
+          : d.kind == AccessoryKind.watch
+              ? Icons.watch
+              : Icons.bluetooth),
+      title: Text(d.displayName),
+      subtitle: Text([
+        d.bleId,
+        if (d.systemConnected) 'connected' else 'paired',
+      ].join(' • ')),
+      trailing: adopted
+          ? const Icon(Icons.check, color: Colors.green)
+          : d.kind != null
+              ? const Icon(Icons.add_link)
+              : null,
+      onTap: adopted
+          ? null
+          : d.kind != null
+              ? () => _adoptSystem(context, ref, d, d.kind!)
+              : () => _pickKind(context, ref, d),
+    );
+  }
+
+  Widget _scanTile(BuildContext context, WidgetRef ref, AccessoryHit hit) {
+    final r = hit.result;
+    final name = r.advertisementData.advName.isNotEmpty
+        ? r.advertisementData.advName
+        : r.device.platformName;
+    return ListTile(
+      leading: Icon(
+          hit.kind == AccessoryKind.earbuds ? Icons.earbuds : Icons.watch),
+      title: Text(name.isEmpty
+          ? (hit.kind == AccessoryKind.earbuds ? 'PineBuds' : 'PineTime')
+          : name),
+      subtitle: Text('${r.device.remoteId.str} • ${r.rssi} dBm'),
+      trailing: const Icon(Icons.add_link),
+      onTap: () => _adoptScan(context, ref, hit),
+    );
+  }
+
+  /// Bonded device with no wearable name match — let the user declare
+  /// what it is before adopting.
+  void _pickKind(
+      BuildContext context, WidgetRef ref, SystemAccessory d) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: Text('Add ${d.displayName}'),
+        children: [
+          SimpleDialogOption(
+            child: const ListTile(
+                dense: true,
+                leading: Icon(Icons.watch),
+                title: Text('PineTime watch')),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _adoptSystem(context, ref, d, AccessoryKind.watch);
+            },
+          ),
+          SimpleDialogOption(
+            child: const ListTile(
+                dense: true,
+                leading: Icon(Icons.earbuds),
+                title: Text('PineBuds earbuds')),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _adoptSystem(context, ref, d, AccessoryKind.earbuds);
+            },
           ),
         ],
       ),
     );
   }
 
-  /// One-tap adopt: close the sheet, persist the record, and let the
-  /// manager connect + pair in the background. No blocking dialog — the
-  /// card's "connecting…" state is the progress indicator, and the
-  /// link's retry loop keeps working if the device is slow to answer.
-  void _adopt(BuildContext context, WidgetRef ref, AccessoryHit hit) {
+  void _adoptSystem(BuildContext context, WidgetRef ref, SystemAccessory d,
+      AccessoryKind kind) {
+    _adopt(context, ref, d.bleId, _uniqueDefault(d.bleId, d.displayName, kind),
+        kind);
+  }
+
+  void _adoptScan(BuildContext context, WidgetRef ref, AccessoryHit hit) {
+    final adv = hit.result.advertisementData.advName;
     final bleId = hit.result.device.remoteId.str;
-    final name = hit.result.advertisementData.advName.isNotEmpty
-        ? hit.result.advertisementData.advName
-        : (hit.kind == AccessoryKind.earbuds ? 'PineBuds' : 'PineTime');
-    Navigator.of(context).pop(); // sheet — the card shows the state now
-    if (hit.kind == AccessoryKind.earbuds) {
-      unawaited(ref
-          .read(earbudsManagerProvider.notifier)
-          .adopt(bleId, name: name));
+    _adopt(context, ref, bleId, _uniqueDefault(bleId, adv, hit.kind), hit.kind);
+  }
+
+  /// Identifying default name: two InfiniTime watches can't share one
+  /// label, so generic firmware names gain a MAC-derived suffix. A
+  /// custom Bluetooth name is kept as-is (already identifying).
+  static String _uniqueDefault(
+      String bleId, String? name, AccessoryKind kind) {
+    final base = (name ?? '').trim();
+    final tail = bleId.replaceAll(RegExp('[^0-9A-Fa-f]'), '');
+    final suffix = tail.length > 4
+        ? tail.substring(tail.length - 4).toUpperCase()
+        : tail.toUpperCase();
+    final fallback = kind == AccessoryKind.earbuds ? 'PineBuds' : 'PineTime';
+    if (base.isEmpty) return '$fallback-$suffix';
+    final n = base.toLowerCase();
+    const generic = ['infinitime', 'pinetime', 'pinebuds', 'bes_ble', 'buds'];
+    if (generic.any(n.contains)) return '$base-$suffix';
+    return base;
+  }
+
+  /// Name-then-adopt: the chosen name becomes the record name AND the
+  /// Brain device_name at pairing, so two watches land as independent,
+  /// distinguishable Brain devices. Connect + pair run in background —
+  /// the card's "connecting…" state is the progress indicator.
+  Future<void> _adopt(BuildContext context, WidgetRef ref, String bleId,
+      String defaultName, AccessoryKind kind) async {
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) {
+        final ctrl = TextEditingController(text: defaultName);
+        return AlertDialog(
+          title: Text(
+              'Add ${kind == AccessoryKind.earbuds ? 'earbuds' : 'watch'}'),
+          content: TextField(
+            controller: ctrl,
+            autofocus: true,
+            decoration: const InputDecoration(
+                labelText: 'Device name',
+                helperText: 'Shown on the device list and Brain'),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel')),
+            FilledButton(
+                onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+                child: const Text('Add')),
+          ],
+        );
+      },
+    );
+    if (name == null || name.isEmpty || !context.mounted) return;
+    // Messenger lookup must happen before pop — the sheet's context is
+    // unsafe for inherited lookups once it deactivates.
+    final messenger = ScaffoldMessenger.of(context);
+    Navigator.of(context).pop();
+    if (kind == AccessoryKind.earbuds) {
+      unawaited(
+          ref.read(earbudsManagerProvider.notifier).adopt(bleId, name: name));
     } else {
       unawaited(
           ref.read(watchManagerProvider.notifier).adopt(bleId, name: name));
     }
-    ScaffoldMessenger.of(context).showSnackBar(
+    messenger.showSnackBar(
         SnackBar(content: Text('Connecting to $name…')),);
   }
 }
+
+/// Rename an adopted accessory on Brain (``PUT /device/{uuid}/identity``)
+/// and in the local record — the display name stays in sync because
+/// heartbeats send the record name.
+Future<void> _renameAccessory(BuildContext context, WidgetRef ref,
+    {required String bleId,
+    required String deviceUuid,
+    required String? current,
+    required AccessoryKind kind,}) async {
+  final ctrl = TextEditingController(
+      text: (current == null || current.isEmpty)
+          ? (kind == AccessoryKind.earbuds ? 'PineBuds' : 'PineTime')
+          : current,);
+  final name = await showDialog<String>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Rename device'),
+      content: TextField(
+        controller: ctrl,
+        autofocus: true,
+        decoration: const InputDecoration(labelText: 'Device name'),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+        FilledButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: const Text('Save')),
+      ],
+    ),
+  );
+  if (name == null || name.isEmpty || !context.mounted) return;
+  try {
+    await BrainClient.instance.putJson('/device/$deviceUuid/identity',
+        body: {'device_name': name},);
+  } catch (e) {
+    // Brain rename failed (offline) — the local name still updates and
+    // the next heartbeat carries it up.
+    debugPrint('[accessory] rename: $e');
+  }
+  if (kind == AccessoryKind.earbuds) {
+    final records = ref.read(earbudsListProvider).valueOrNull ?? const [];
+    final rec =
+        records.where((r) => r.bleId == bleId).firstOrNull;
+    if (rec == null) return;
+    final updated = rec.copyWith(name: name);
+    await EarbudsStore.instance.upsert(updated);
+    ref.read(earbudsManagerProvider)[bleId]?.record = updated;
+    await ref.read(earbudsListProvider.notifier).refresh();
+  } else {
+    final records = ref.read(watchListProvider).valueOrNull ?? const [];
+    final rec = records.where((w) => w.bleId == bleId).firstOrNull;
+    if (rec == null) return;
+    final updated = rec.copyWith(name: name);
+    await WatchStore.instance.upsert(updated);
+    ref.read(watchManagerProvider)[bleId]?.record = updated;
+    await ref.read(watchListProvider.notifier).refresh();
+  }
+}
+
+

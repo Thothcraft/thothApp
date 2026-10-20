@@ -48,8 +48,12 @@ class LegacyDfu {
 
   /// Extract (bin, dat) from a ``*-dfu.zip`` — mcuboot zips carry a
   /// manifest.json + the image + init packet.
-  static (Uint8List bin, Uint8List dat) unpackZip(String zipPath) {
-    final bytes = File(zipPath).readAsBytesSync();
+  static (Uint8List bin, Uint8List dat) unpackZip(String zipPath) =>
+      unpackBytes(File(zipPath).readAsBytesSync());
+
+  /// Same as [unpackZip] but for bytes already in memory (app-bundled
+  /// asset, downloaded buffer).
+  static (Uint8List bin, Uint8List dat) unpackBytes(Uint8List bytes) {
     final zip = ZipDecoder().decodeBytes(bytes);
     Uint8List? bin, dat;
     for (final f in zip.files) {

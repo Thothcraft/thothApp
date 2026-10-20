@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' show LatLng;
@@ -1441,6 +1442,13 @@ class _FirmwareUpdateCardState extends ConsumerState<_FirmwareUpdateCard> {
   bool _checked = false;
   final _feed = WatchFirmwareFeed();
 
+  /// Thoth-fork image bundled with the app — stamped motion + neighbor
+  /// scan GATT. Always flashable offline; the release feed remains the
+  /// way to pick up anything newer than the bundled build.
+  static const _bundledAsset =
+      'assets/firmware/pinetime-mcuboot-app-dfu-1.16.99.zip';
+  static const _bundledVersion = '1.16.99';
+
   @override
   void initState() {
     super.initState();
@@ -1491,6 +1499,24 @@ class _FirmwareUpdateCardState extends ConsumerState<_FirmwareUpdateCard> {
         }
       },);
       final (bin, dat) = LegacyDfu.unpackZip(path);
+      await _flash(bin, dat);
+    } catch (e) {
+      _fail(e);
+    }
+  }
+
+  /// Bundled path: unpack the asset in memory and flash — works
+  /// offline and never depends on the release feed.
+  Future<void> _startBundled() async {
+    setState(() {
+      _running = true;
+      _percent = 0;
+      _status = 'Unpacking bundled $_bundledVersion…';
+    });
+    try {
+      final bytes =
+          (await rootBundle.load(_bundledAsset)).buffer.asUint8List();
+      final (bin, dat) = LegacyDfu.unpackBytes(bytes);
       await _flash(bin, dat);
     } catch (e) {
       _fail(e);
@@ -1585,6 +1611,8 @@ class _FirmwareUpdateCardState extends ConsumerState<_FirmwareUpdateCard> {
     final latestFw = _latest?.fwVersion ?? '';
     final outdated = latestFw.isNotEmpty &&
         firmwareIsNewer(installed ?? '', latestFw);
+    final bundledNewer =
+        firmwareIsNewer(installed ?? '', _bundledVersion);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -1629,9 +1657,15 @@ class _FirmwareUpdateCardState extends ConsumerState<_FirmwareUpdateCard> {
                 icon: const Icon(Icons.system_update),
                 label: Text(_running
                     ? 'Updating…'
-                    : _latest == null
-                        ? (_checked ? 'No release found' : 'Checking…')
-                        : 'Update to ${_latest!.fwVersion.isEmpty ? _latest!.tag : _latest!.fwVersion}',),
+                    : 'Flash thoth $_bundledVersion'
+                        '${bundledNewer ? ' (bundled)' : ' (bundled — already installed)'}',),
+                onPressed: _running ? null : _startBundled,
+              ),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.cloud_download),
+                label: Text(_latest == null
+                    ? (_checked ? 'No release found' : 'Checking…')
+                    : 'Feed ${_latest!.fwVersion.isEmpty ? _latest!.tag : _latest!.fwVersion}'),
                 onPressed: _running || _latest == null ? null : _startLatest,
               ),
               OutlinedButton.icon(

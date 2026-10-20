@@ -79,19 +79,29 @@ class WatchStore {
   Future<void> save(List<WatchRecord> watches) =>
       _storage.write(key: _key, value: json.encode(watches.map((w) => w.toJson()).toList()));
 
-  Future<void> upsert(WatchRecord record) async {
-    final all = (await load()).toList();
-    final i = all.indexWhere((w) => w.bleId == record.bleId);
-    if (i >= 0) {
-      all[i] = record;
-    } else {
-      all.add(record);
-    }
-    await save(all);
+  /// Load-modify-save is serialized — adopt + deferred Brain pairing
+  /// upsert concurrently, and an interleaved read would silently drop
+  /// the other record (a second watch vanishing from the list).
+  Future _writeTail = Future.value();
+  Future<void> _mutate(Future<void> Function(List<WatchRecord>) fn) {
+    final next = _writeTail.then((_) async {
+      final all = (await load()).toList();
+      await fn(all);
+      await save(all);
+    });
+    _writeTail = next.catchError((_) {});
+    return next;
   }
 
-  Future<void> remove(String bleId) async {
-    final all = (await load()).toList()..removeWhere((w) => w.bleId == bleId);
-    await save(all);
-  }
+  Future<void> upsert(WatchRecord record) => _mutate((all) async {
+        final i = all.indexWhere((w) => w.bleId == record.bleId);
+        if (i >= 0) {
+          all[i] = record;
+        } else {
+          all.add(record);
+        }
+      });
+
+  Future<void> remove(String bleId) =>
+      _mutate((all) async => all.removeWhere((w) => w.bleId == bleId));
 }

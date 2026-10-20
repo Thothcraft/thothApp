@@ -22,6 +22,28 @@ class EarbudsGatt {
   /// also identifies the buds before ours is connected.
   static final opbConfigService =
       Guid('0000ffc0-0000-1000-8000-00805f9b34fb');
+  static final charGestureLeft =
+      Guid('0000ffc1-0000-1000-8000-00805f9b34fb'); // READ + WRITE, 16 B
+  static final charGestureRight =
+      Guid('0000ffc2-0000-1000-8000-00805f9b34fb'); // READ + WRITE, 16 B
+  static final charConfigVersion =
+      Guid('0000ffc3-0000-1000-8000-00805f9b34fb'); // READ, 3 B
+
+  /// Stock OpenPineBuds parametric-EQ service (8 hardware IIR bands).
+  static final eqService =
+      Guid('0000ffd0-0000-1000-8000-00805f9b34fb');
+  static final charEqConfig =
+      Guid('0000ffd1-0000-1000-8000-00805f9b34fb'); // READ + WRITE, 144 B
+  static final charEqPreset =
+      Guid('0000ffd2-0000-1000-8000-00805f9b34fb'); // READ + WRITE, u32
+  static final charEqEnable =
+      Guid('0000ffd3-0000-1000-8000-00805f9b34fb'); // READ + WRITE, u8
+  static final charEqCaps =
+      Guid('0000ffd4-0000-1000-8000-00805f9b34fb'); // READ, 16 B
+  static final charEqApply =
+      Guid('0000ffd5-0000-1000-8000-00805f9b34fb'); // WRITE, cmd byte
+  static final charEqStatus =
+      Guid('0000ffd6-0000-1000-8000-00805f9b34fb'); // NOTIFY, u8 code
 
   /// Advertised name on current firmware builds.
   static bool looksLikeBuds(ScanResult r) {
@@ -222,4 +244,132 @@ class EarbudsCodec {
         Endian.little);
     return b.buffer.asUint8List();
   }
+
+  // ── opb_config (FFC0): gesture → action remap ──────────────────────────
+
+  /// Gesture slots in wire order — each is a u32le action code.
+  static const gestureSlots = [
+    'single_tap', 'double_tap', 'triple_tap', 'long_press',
+  ];
+
+  /// Action codes assignable per slot (GATT_SPEC table + thoth actions).
+  static const actionNames = {
+    0x00: 'none', 0x01: 'play/pause', 0x02: 'next track',
+    0x03: 'previous track', 0x04: 'volume up', 0x05: 'volume down',
+    0x06: 'toggle ANC', 0x07: 'voice assistant', 0x08: 'answer call',
+    0x09: 'reject call', 0x0A: 'end call', 0x0B: 'mute mic',
+    0x0C: 'transparency', 0x0D: 'ANC off', 0x0E: 'toggle EQ',
+    0x0F: 'enter pairing',
+    0x10: 'thoth voice', 0x11: 'thoth voice end', 0x12: 'thoth context',
+    0x13: 'thoth automation 1', 0x14: 'thoth automation 2',
+    0x15: 'thoth automation 3',
+  };
+
+  /// Stock mapping the buds ship with (per GATT_SPEC defaults).
+  static const defaultGestureLeft = [0x01, 0x03, 0x05, 0x06];
+  static const defaultGestureRight = [0x01, 0x02, 0x04, 0x06];
+
+  /// FFC1/FFC2 `<IIII` — 4 gesture slots as u32le action codes.
+  static List<int>? decodeGestureMap(List<int> v) {
+    if (v.length < 16) return null;
+    final b = ByteData.sublistView(Uint8List.fromList(v));
+    return List.generate(4, (i) => b.getUint32(i * 4, Endian.little));
+  }
+
+  static Uint8List encodeGestureMap(List<int> actions) {
+    final b = ByteData(16);
+    for (var i = 0; i < 4 && i < actions.length; i++) {
+      b.setUint32(i * 4, actions[i], Endian.little);
+    }
+    return b.buffer.asUint8List();
+  }
+
+  // ── opb_eq (FFD0): 8-band hardware parametric EQ ───────────────────────
+
+  static const eqFilterNames = [
+    'low shelf', 'peak', 'high shelf', 'low pass', 'high pass',
+  ];
+
+  /// (id, label) — firmware presets; 0xFF marks the custom 144 B config.
+  static const eqPresets = [
+    (0, 'Flat'), (1, 'Bass Boost'), (2, 'Treble Boost'), (3, 'V-Shape'),
+    (4, 'Vocal'), (5, 'Classical'), (6, 'Rock'), (7, 'Jazz'),
+    (8, 'Electronic'), (9, 'Podcast'), (0xFF, 'Custom'),
+  ];
+
+  /// FFD1 — 16 B header + up to 8 × 16 B bands = 144 B.
+  static EqConfig? decodeEqConfig(List<int> v) {
+    if (v.length < 16) return null;
+    final b = ByteData.sublistView(Uint8List.fromList(v));
+    final n = b.getUint32(8, Endian.little).clamp(0, 8);
+    final bands = <EqBand>[];
+    for (var i = 0; i < n && 16 + i * 16 + 16 <= v.length; i++) {
+      final o = 16 + i * 16;
+      bands.add(EqBand(
+        filterType: b.getUint32(o, Endian.little),
+        gainDb: b.getFloat32(o + 4, Endian.little),
+        freqHz: b.getFloat32(o + 8, Endian.little),
+        q: b.getFloat32(o + 12, Endian.little),
+      ));
+    }
+    return EqConfig(
+      preGainDb: b.getFloat32(0, Endian.little),
+      postGainDb: b.getFloat32(4, Endian.little),
+      bands: bands,
+    );
+  }
+
+  static Uint8List encodeEqConfig(EqConfig c) {
+    final b = ByteData(144);
+    b.setFloat32(0, c.preGainDb, Endian.little);
+    b.setFloat32(4, c.postGainDb, Endian.little);
+    b.setUint32(8, c.bands.length.clamp(0, 8), Endian.little);
+    for (var i = 0; i < c.bands.length && i < 8; i++) {
+      final o = 16 + i * 16;
+      final band = c.bands[i];
+      b.setUint32(o, band.filterType, Endian.little);
+      b.setFloat32(o + 4, band.gainDb, Endian.little);
+      b.setFloat32(o + 8, band.freqHz, Endian.little);
+      b.setFloat32(o + 12, band.q, Endian.little);
+    }
+    return b.buffer.asUint8List();
+  }
+
+  /// FFD5 — firmware only reads byte 0: 1=apply+save, 2=apply temp,
+  /// 3=reset flat, 0xFF=reboot.
+  static Uint8List encodeEqApply(int command) =>
+      Uint8List.fromList([command, 0, 0, 0]);
+}
+
+class EqBand {
+  const EqBand(
+      {required this.filterType,
+      required this.gainDb,
+      required this.freqHz,
+      required this.q});
+
+  final int filterType;
+  final double gainDb;
+  final double freqHz;
+  final double q;
+
+  EqBand copyWith({int? filterType, double? gainDb, double? freqHz,
+          double? q}) =>
+      EqBand(
+        filterType: filterType ?? this.filterType,
+        gainDb: gainDb ?? this.gainDb,
+        freqHz: freqHz ?? this.freqHz,
+        q: q ?? this.q,
+      );
+}
+
+class EqConfig {
+  const EqConfig(
+      {required this.preGainDb,
+      required this.postGainDb,
+      required this.bands});
+
+  final double preGainDb;
+  final double postGainDb;
+  final List<EqBand> bands;
 }

@@ -145,6 +145,8 @@ class AppScaffold extends ConsumerWidget {
               () => context.go(AppRoutes.events),),
           _item(context, Icons.science_outlined, 'Research & models',
               () => context.go(AppRoutes.research),),
+          _item(context, Icons.timeline, 'Timeline',
+              () => context.push('/context/timeline'),),
           _item(context, Icons.insights_outlined, 'Context & entities',
               () => context.push('/context/home'),),
           _item(context, Icons.auto_awesome, 'Context inference (LLM)',

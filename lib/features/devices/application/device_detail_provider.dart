@@ -57,6 +57,17 @@ final deviceNetProvider = FutureProvider.autoDispose
   }
 });
 
+/// Attached ESP32 (thoth_csi) boards — `{boards: [{name, mac, role,
+/// ssid, ip, connected, serial_port}]}` as last reported on serial.
+final deviceEsp32Provider = FutureProvider.autoDispose
+    .family<Map<String, dynamic>, String>((ref, deviceId) async {
+  try {
+    return await NodeClient.instance.esp32Status(deviceId);
+  } catch (_) {
+    return <String, dynamic>{'boards': const []};
+  }
+});
+
 /// Event feed (CONTRACT §6): shared SSE subscription to
 /// `/v1/events/stream` — pushed, not polled. Each emission is a
 /// one-element batch (the same `List<Map>` shape the listener expects),

@@ -8,12 +8,16 @@ import '../domain/earbuds_gatt.dart';
 
 /// One telemetry item from the buds (status change or gesture event).
 class BudsTelemetry {
-  const BudsTelemetry({this.status, this.event, this.info, this.rssi});
+  const BudsTelemetry(
+      {this.status, this.event, this.info, this.rssi, this.eqStatus});
 
   final BudsStatus? status;
   final BudsEvent? event;
   final BudsInfo? info;
   final int? rssi;
+
+  /// FFD6 notify — 0 ok, 1 invalid cfg, 2 checksum err, 3 storage err.
+  final int? eqStatus;
 }
 
 /// BLE central link to PineBuds Pro running the thothBuds image.
@@ -53,6 +57,11 @@ class EarbudsLink {
 
   bool get isConnected => device.isConnected;
   String get bleId => device.remoteId.str;
+
+  /// Last connect/subscribe failure — shown on the card/detail so a
+  /// bud that won't link says why (timeout, GATT busy, out of range).
+  String? _lastError;
+  String? get lastError => _lastError;
 
   /// BLE scan for buds advertisers — same entry point shape as
   /// [WatchLink.scan] so the unified accessory sheet can merge them.
@@ -104,8 +113,9 @@ class EarbudsLink {
           await _subscribe().timeout(const Duration(seconds: 30));
           _armWatchdog();
           return;
-        } catch (_) {
+        } catch (e) {
           if (_disposed) return;
+          _lastError = '$e';
           await Future<void>.delayed(backoff);
           backoff = backoff * 2 > const Duration(seconds: 30)
               ? const Duration(seconds: 30)
@@ -182,6 +192,8 @@ class EarbudsLink {
         (v) => BudsTelemetry(status: EarbudsCodec.decodeStatus(v)));
     await notify(EarbudsGatt.charEvent,
         (v) => BudsTelemetry(event: EarbudsCodec.decodeEvent(v)));
+    await notify(EarbudsGatt.charEqStatus,
+        (v) => v.isEmpty ? null : BudsTelemetry(eqStatus: v.first));
 
     // Seed: INFO (firmware/side/caps) + a gateway time reference.
     final info = await _safeRead(EarbudsGatt.charInfo);
@@ -239,6 +251,47 @@ class EarbudsLink {
   Future<bool> writeRaw(Guid uuid, List<int> bytes,
           {bool withoutResponse = false}) =>
       _safeWrite(uuid, bytes, withoutResponse: withoutResponse);
+
+  /// Raw read by characteristic UUID — service discovery already ran, so
+  /// this hits the merged char table from `_subscribe`.
+  Future<List<int>?> readRaw(Guid uuid) => _safeRead(uuid);
+
+  bool hasChar(Guid uuid) => _chars.containsKey(uuid);
+
+  // ── opb_config (FFC0): gesture remap ───────────────────────────────────
+
+  Future<List<int>?> readGestureMap({required bool left}) async {
+    final v = await _safeRead(
+        left ? EarbudsGatt.charGestureLeft : EarbudsGatt.charGestureRight);
+    return v == null ? null : EarbudsCodec.decodeGestureMap(v);
+  }
+
+  Future<bool> writeGestureMap(List<int> actions, {required bool left}) =>
+      _safeWrite(
+          left ? EarbudsGatt.charGestureLeft : EarbudsGatt.charGestureRight,
+          EarbudsCodec.encodeGestureMap(actions));
+
+  // ── opb_eq (FFD0): parametric EQ ───────────────────────────────────────
+
+  Future<EqConfig?> readEqConfig() async {
+    final v = await _safeRead(EarbudsGatt.charEqConfig);
+    return v == null ? null : EarbudsCodec.decodeEqConfig(v);
+  }
+
+  Future<bool> writeEqConfig(EqConfig c) =>
+      _safeWrite(EarbudsGatt.charEqConfig, EarbudsCodec.encodeEqConfig(c));
+
+  Future<bool> setEqPreset(int preset) => _safeWrite(
+      EarbudsGatt.charEqPreset,
+      Uint8List(4)
+        ..buffer.asByteData().setUint32(0, preset, Endian.little));
+
+  Future<bool> setEqEnabled(bool enabled) => _safeWrite(
+      EarbudsGatt.charEqEnable, [enabled ? 1 : 0, 0, 0, 0]);
+
+  /// cmd: 1 apply+save, 2 apply temp, 3 reset flat.
+  Future<bool> applyEq(int command) =>
+      _safeWrite(EarbudsGatt.charEqApply, EarbudsCodec.encodeEqApply(command));
 
   Future<void> dispose() async {
     _disposed = true;

@@ -140,6 +140,27 @@ class NodeClient {
   /// surface (first-time setup).
   Future<dynamic> netDisconnect(String deviceId) =>
       post(deviceId, '/api/v1/net/disconnect');
+
+  // ---- attached ESP32 (thoth_csi) boards ------------------------------
+
+  /// Per-board state reported on the serial line — `{boards: [{name,
+  /// mac, role, ssid, ip, connected, serial_port, sensor_id}]}`.
+  Future<Map<String, dynamic>> esp32Status(String deviceId) =>
+      getMap(deviceId, '/api/v1/esp32');
+
+  /// Push Wi-Fi creds to the attached ESP32(s) — written to their
+  /// serial consoles; the boards persist, reboot and join the AP.
+  /// Independent of whether the node itself is being provisioned.
+  Future<dynamic> esp32NetConnect(String deviceId, String ssid,
+          {String psk = ''}) =>
+      post(deviceId, '/api/v1/esp32/net',
+          body: {'ssid': ssid, 'psk': psk},);
+
+  /// Whitelist-checked console command to the attached ESP32(s) —
+  /// `ping=<hz>` (0–200 CSI stimulus), `sweep=0|1`, `role=`,
+  /// `chans=`, `name=`, or a `…?` query. Applied live, no reboot.
+  Future<dynamic> esp32Cmd(String deviceId, String cmd) =>
+      post(deviceId, '/api/v1/esp32/cmd', body: {'cmd': cmd},);
 }
 
 class NodeRelayException implements Exception {

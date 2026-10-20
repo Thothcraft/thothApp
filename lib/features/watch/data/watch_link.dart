@@ -61,6 +61,11 @@ class WatchLink {
   /// changed sample (the watch woke or actually moved).
   bool get motionStale => _motionStale;
 
+  /// Last connect/subscribe failure — surfaced on the accessory card so
+  /// a stuck watch shows *why* instead of "connecting…" forever.
+  String? _lastError;
+  String? get lastError => _lastError;
+
   void _noteMotionPayload(List<int> v) {
     final last = _lastMotionRaw;
     final same = last != null &&
@@ -178,8 +183,9 @@ class WatchLink {
           await _subscribe().timeout(const Duration(seconds: 30));
           _armWatchdog();
           return;
-        } catch (_) {
+        } catch (e) {
           if (_disposed) return;
+          _lastError = '$e';
           // Exponential-ish backoff capped at 30 s — a watch left
           // overnight shouldn't get hammered every 2 s forever.
           await Future<void>.delayed(backoff);

@@ -59,6 +59,7 @@ class WatchManager extends Notifier<Map<String, WatchRelay>> {
           _scanSubs.remove(key)?.cancel();
           state[key]?.dispose();
           state = {...state}..remove(key);
+          unawaited(TraceService.instance.detachRelay(key));
         }
       }
     });
@@ -249,7 +250,7 @@ class WatchManager extends Notifier<Map<String, WatchRelay>> {
     await _scanSubs.remove(bleId)?.cancel();
     await state[bleId]?.dispose();
     state = {...state}..remove(bleId);
-    if (state.isEmpty) await TraceService.instance.detach();
+    await TraceService.instance.detachRelay(bleId);
   }
 }
 
