@@ -934,6 +934,18 @@ class _Esp32CredSheetState extends ConsumerState<_Esp32CredSheet> {
   final _ssid = TextEditingController();
   final _psk = TextEditingController();
   bool _sending = false;
+  String? _hostSsid;   // the node's own current Wi-Fi — the default
+
+  @override
+  void initState() {
+    super.initState();
+    NodeClient.instance.netStatus(widget.deviceId).then((m) {
+      final wifi = m['wifi'];
+      if (wifi is Map && wifi['ssid'] is String && mounted) {
+        setState(() => _hostSsid = wifi['ssid'] as String);
+      }
+    }).catchError((_) {});
+  }
 
   @override
   void dispose() {
@@ -955,15 +967,21 @@ class _Esp32CredSheetState extends ConsumerState<_Esp32CredSheet> {
           const Text('ESP32 Wi-Fi credentials',
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),),
           const SizedBox(height: 4),
-          const Text(
-            'Written to the board\'s serial console — it persists, '
-            'reboots, joins the AP and starts producing CSI off the '
-            'router.',
-            style: TextStyle(fontSize: 12, color: Colors.black54),),
+          Text(
+            _hostSsid != null
+                ? 'Default is the host\'s network ($_hostSsid) — the '
+                  'node writes its own credentials to the board. Or '
+                  'enter a different network below.'
+                : 'Written to the board\'s serial console — it persists, '
+                  'reboots, joins the AP and starts producing CSI off '
+                  'the router.',
+            style: const TextStyle(fontSize: 12, color: Colors.black54),),
           const SizedBox(height: 12),
           TextField(
             controller: _ssid,
-            decoration: const InputDecoration(labelText: 'SSID'),
+            decoration: InputDecoration(
+                labelText: 'SSID',
+                hintText: _hostSsid ?? 'Wi-Fi network name'),
             textInputAction: TextInputAction.next,),
           TextField(
             controller: _psk,
@@ -980,6 +998,11 @@ class _Esp32CredSheetState extends ConsumerState<_Esp32CredSheet> {
                     : () => Navigator.of(context).pop(),
                 child: const Text('Cancel'),),
               const SizedBox(width: 8),
+              OutlinedButton(
+                onPressed: _sending ? null : () => _send(useHost: true),
+                child: Text(_hostSsid != null
+                    ? 'Use host Wi-Fi' : 'Host default'),),
+              const SizedBox(width: 8),
               FilledButton(
                 onPressed: _sending ? null : _send,
                 child: Text(_sending ? 'Sending\u2026' : 'Send to board'),
@@ -991,13 +1014,13 @@ class _Esp32CredSheetState extends ConsumerState<_Esp32CredSheet> {
     );
   }
 
-  Future<void> _send() async {
+  Future<void> _send({bool useHost = false}) async {
     final ssid = _ssid.text.trim();
-    if (ssid.isEmpty || _sending) return;
+    if (_sending || (!useHost && ssid.isEmpty)) return;
     setState(() => _sending = true);
     try {
       await NodeClient.instance.esp32NetConnect(
-          widget.deviceId, ssid, psk: _psk.text);
+          widget.deviceId, ssid, psk: _psk.text, useHost: useHost);
       if (mounted) {
         Navigator.of(context).pop();
         // The board reboots then reports ssid/ip on its next SELF_DATA —

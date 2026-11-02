@@ -151,10 +151,12 @@ class NodeClient {
   /// Push Wi-Fi creds to the attached ESP32(s) — written to their
   /// serial consoles; the boards persist, reboot and join the AP.
   /// Independent of whether the node itself is being provisioned.
+  /// `useHost` makes the node fall back to the host's own active Wi-Fi
+  /// credentials (the default when no explicit ssid is given).
   Future<dynamic> esp32NetConnect(String deviceId, String ssid,
-          {String psk = ''}) =>
+          {String psk = '', bool useHost = false}) =>
       post(deviceId, '/api/v1/esp32/net',
-          body: {'ssid': ssid, 'psk': psk},);
+          body: {'ssid': ssid, 'psk': psk, 'use_host': useHost},);
 
   /// Whitelist-checked console command to the attached ESP32(s) —
   /// `ping=<hz>` (0–200 CSI stimulus), `sweep=0|1`, `role=`,
